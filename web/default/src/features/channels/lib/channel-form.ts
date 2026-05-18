@@ -56,6 +56,12 @@ export const channelFormSchema = z.object({
   allow_inference_geo: z.boolean().optional(), // OpenAI/Anthropic: inference geography
   allow_speed: z.boolean().optional(), // Anthropic: speed mode control
   claude_beta_query: z.boolean().optional(), // Anthropic: beta query passthrough
+  // Passthrough channel (type=59) settings
+  passthrough_allowed_path_prefixes: z.string().optional(), // newline-separated list
+  passthrough_allowed_methods: z.string().optional(), // comma-separated list, empty == all
+  passthrough_auth_type: z.enum(['', 'none', 'bearer', 'header', 'basic']).optional(),
+  passthrough_auth_header_name: z.string().optional(),
+  passthrough_timeout_ms: z.number().optional(),
   // Upstream model update settings (stored in settings JSON)
   upstream_model_update_check_enabled: z.boolean().optional(),
   upstream_model_update_auto_sync_enabled: z.boolean().optional(),
@@ -114,6 +120,12 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   allow_inference_geo: false,
   allow_speed: false,
   claude_beta_query: false,
+  // Passthrough defaults — empty prefixes means "deny all" on the backend.
+  passthrough_allowed_path_prefixes: '',
+  passthrough_allowed_methods: '',
+  passthrough_auth_type: '',
+  passthrough_auth_header_name: '',
+  passthrough_timeout_ms: 0,
   upstream_model_update_check_enabled: false,
   upstream_model_update_auto_sync_enabled: false,
   upstream_model_update_ignored_models: '',
@@ -168,6 +180,11 @@ export function transformChannelToFormDefaults(
   let allowInferenceGeo = false
   let allowSpeed = false
   let claudeBetaQuery = false
+  let passthroughAllowedPathPrefixes = ''
+  let passthroughAllowedMethods = ''
+  let passthroughAuthType: '' | 'none' | 'bearer' | 'header' | 'basic' = ''
+  let passthroughAuthHeaderName = ''
+  let passthroughTimeoutMs = 0
   let upstreamModelUpdateCheckEnabled = false
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
@@ -186,6 +203,21 @@ export function transformChannelToFormDefaults(
       allowInferenceGeo = parsed.allow_inference_geo === true
       allowSpeed = parsed.allow_speed === true
       claudeBetaQuery = parsed.claude_beta_query === true
+      if (parsed.passthrough && typeof parsed.passthrough === 'object') {
+        if (Array.isArray(parsed.passthrough.allowed_path_prefixes)) {
+          passthroughAllowedPathPrefixes = parsed.passthrough.allowed_path_prefixes.join('\n')
+        }
+        if (Array.isArray(parsed.passthrough.allowed_methods)) {
+          passthroughAllowedMethods = parsed.passthrough.allowed_methods.join(',')
+        }
+        if (parsed.passthrough.auth && typeof parsed.passthrough.auth === 'object') {
+          passthroughAuthType = (parsed.passthrough.auth.type || '') as typeof passthroughAuthType
+          passthroughAuthHeaderName = parsed.passthrough.auth.header_name || ''
+        }
+        if (typeof parsed.passthrough.timeout_ms === 'number') {
+          passthroughTimeoutMs = parsed.passthrough.timeout_ms
+        }
+      }
       upstreamModelUpdateCheckEnabled =
         parsed.upstream_model_update_check_enabled === true
       upstreamModelUpdateAutoSyncEnabled =
@@ -241,6 +273,11 @@ export function transformChannelToFormDefaults(
     allow_speed: allowSpeed,
     claude_beta_query: claudeBetaQuery,
     allow_safety_identifier: allowSafetyIdentifier,
+    passthrough_allowed_path_prefixes: passthroughAllowedPathPrefixes,
+    passthrough_allowed_methods: passthroughAllowedMethods,
+    passthrough_auth_type: passthroughAuthType,
+    passthrough_auth_header_name: passthroughAuthHeaderName,
+    passthrough_timeout_ms: passthroughTimeoutMs,
     upstream_model_update_check_enabled: upstreamModelUpdateCheckEnabled,
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
     upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
@@ -330,6 +367,50 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
       delete settingsObj.allow_include_obfuscation
     if (formData.type !== 14 && 'allow_inference_geo' in settingsObj)
       delete settingsObj.allow_inference_geo
+  }
+
+  // Passthrough channel (type 59): forward arbitrary HTTP requests to a
+  // configured upstream service. Empty allowed_path_prefixes is intentional
+  // (deny-all default on the backend); operator MUST add at least one prefix.
+  if (formData.type === 59) {
+    const passthrough: Record<string, unknown> = {}
+    const prefixes = String(formData.passthrough_allowed_path_prefixes || '')
+      .split(/\r?\n/)
+      .map((p) => p.trim())
+      .filter(Boolean)
+    if (prefixes.length > 0) {
+      passthrough.allowed_path_prefixes = prefixes
+    }
+    const methods = String(formData.passthrough_allowed_methods || '')
+      .split(',')
+      .map((m) => m.trim().toUpperCase())
+      .filter(Boolean)
+    if (methods.length > 0) {
+      passthrough.allowed_methods = methods
+    }
+    if (
+      formData.passthrough_auth_type &&
+      formData.passthrough_auth_type !== 'none'
+    ) {
+      const auth: Record<string, unknown> = { type: formData.passthrough_auth_type }
+      if (formData.passthrough_auth_type === 'header' && formData.passthrough_auth_header_name) {
+        auth.header_name = formData.passthrough_auth_header_name
+      }
+      passthrough.auth = auth
+    }
+    if (
+      typeof formData.passthrough_timeout_ms === 'number' &&
+      formData.passthrough_timeout_ms > 0
+    ) {
+      passthrough.timeout_ms = formData.passthrough_timeout_ms
+    }
+    if (Object.keys(passthrough).length > 0) {
+      settingsObj.passthrough = passthrough
+    } else if ('passthrough' in settingsObj) {
+      delete settingsObj.passthrough
+    }
+  } else if ('passthrough' in settingsObj) {
+    delete settingsObj.passthrough
   }
 
   // Anthropic (type 14): claude_beta_query, allow_inference_geo, allow_speed

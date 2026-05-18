@@ -150,6 +150,12 @@ func SetRelayRouter(router *gin.Engine) {
 			controller.Relay(c, types.RelayFormatOpenAI)
 		})
 
+		// Generic HTTP passthrough — forwards ANY method to upstream service
+		// configured on a Passthrough channel (type=59). The :model param
+		// drives channel selection; *path is the upstream sub-path subject to
+		// per-channel allow-list validation.
+		httpRouter.Any("/custom/:model/*path", controller.CustomPassthrough)
+
 		// not implemented
 		httpRouter.POST("/images/variations", controller.RelayNotImplemented)
 		httpRouter.GET("/files", controller.RelayNotImplemented)

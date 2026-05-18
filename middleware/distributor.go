@@ -270,6 +270,12 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 			modelRequest.Model = modelName
 		}
 		c.Set("relay_mode", relayMode)
+	} else if strings.HasPrefix(c.Request.URL.Path, "/v1/custom/") {
+		// Generic HTTP passthrough: /v1/custom/:model/*path — model is the
+		// routing key, not necessarily an upstream identifier. We extract it
+		// from the URL parameter (set by gin's path matching) so the request
+		// body can be anything (binary, multipart, custom JSON schema).
+		modelRequest.Model = c.Param("model")
 	} else if !strings.HasPrefix(c.Request.URL.Path, "/v1/audio/transcriptions") && !strings.Contains(c.Request.Header.Get("Content-Type"), "multipart/form-data") {
 		req, err := getModelFromRequest(c)
 		if err != nil {

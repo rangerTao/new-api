@@ -1764,6 +1764,147 @@ export function ChannelMutateDrawer({
                   />
                 )}
 
+                {/* Passthrough (type 59) — generic HTTP forwarder */}
+                {currentType === 59 && (
+                  <>
+                    <FormField
+                      control={form.control}
+                      name='passthrough_allowed_path_prefixes'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('Allowed Path Prefixes *')}</FormLabel>
+                          <FormControl>
+                            <Textarea
+                              placeholder={'/api/layout/\n/health'}
+                              rows={4}
+                              {...field}
+                              value={field.value || ''}
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            {t(
+                              'One prefix per line. Requests whose sub-path does NOT start with any of these prefixes are rejected with 403. Leave blank to deny all (fail-safe default).'
+                            )}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name='passthrough_allowed_methods'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('Allowed HTTP Methods')}</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder='POST,GET'
+                              {...field}
+                              value={field.value || ''}
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            {t(
+                              'Comma-separated. Empty means all methods are allowed. Methods are case-insensitive.'
+                            )}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name='passthrough_auth_type'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('Upstream Auth Mode')}</FormLabel>
+                          <Select
+                            value={field.value ? field.value : 'none'}
+                            onValueChange={(v) =>
+                              field.onChange(v === 'none' ? '' : v)
+                            }
+                          >
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue placeholder={t('No auth header')} />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value='none'>{t('No auth header')}</SelectItem>
+                              <SelectItem value='bearer'>
+                                {t('Bearer (Authorization: Bearer <key>)')}
+                              </SelectItem>
+                              <SelectItem value='header'>
+                                {t('Custom header (use field below)')}
+                              </SelectItem>
+                              <SelectItem value='basic'>
+                                {t('Basic (key must be user:pass)')}
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormDescription>
+                            {t(
+                              'Selects how the channel Key is sent to the upstream service. Pick "No auth header" when the upstream is reached on a private network without authentication.'
+                            )}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    {form.watch('passthrough_auth_type') === 'header' && (
+                      <FormField
+                        control={form.control}
+                        name='passthrough_auth_header_name'
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>{t('Custom Header Name')}</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder='X-Api-Key'
+                                {...field}
+                                value={field.value || ''}
+                              />
+                            </FormControl>
+                            <FormDescription>
+                              {t(
+                                'Required when Auth Mode is "Custom header". The channel Key will be set as this header value verbatim.'
+                              )}
+                            </FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    )}
+                    <FormField
+                      control={form.control}
+                      name='passthrough_timeout_ms'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('Upstream Timeout (ms)')}</FormLabel>
+                          <FormControl>
+                            <Input
+                              type='number'
+                              placeholder='0 (no client-side timeout)'
+                              value={
+                                typeof field.value === 'number' ? field.value : 0
+                              }
+                              onChange={(e) =>
+                                field.onChange(Number(e.target.value || 0))
+                              }
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            {t(
+                              'Request-scope timeout cap. 0 means no extra cap (the request still aborts when the client disconnects).'
+                            )}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </>
+                )}
+
                 {/* Coze (type 49) */}
                 {currentType === 49 && (
                   <FormField

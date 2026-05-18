@@ -55,6 +55,7 @@ const (
 	ChannelTypeSora           = 55
 	ChannelTypeReplicate      = 56
 	ChannelTypeCodex          = 57
+	ChannelTypePassthrough    = 59 // Generic HTTP passthrough — forwards ANY /v1/custom/:model/*path to upstream
 	ChannelTypeDummy          // this one is only for count, do not add any channel after this
 
 )
@@ -118,6 +119,8 @@ var ChannelBaseURLs = []string{
 	"https://api.openai.com",                    //55
 	"https://api.replicate.com",                 //56
 	"https://chatgpt.com",                       //57
+	"",                                          //58 reserved
+	"",                                          //59 passthrough — set per-channel via base_url
 }
 
 var ChannelTypeNames = map[int]string{
@@ -175,6 +178,7 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeSora:           "Sora",
 	ChannelTypeReplicate:      "Replicate",
 	ChannelTypeCodex:          "Codex",
+	ChannelTypePassthrough:    "Passthrough",
 }
 
 func GetChannelTypeName(channelType int) string {

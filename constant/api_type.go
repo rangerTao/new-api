@@ -36,5 +36,6 @@ const (
 	APITypeMiniMax
 	APITypeReplicate
 	APITypeCodex
-	APITypeDummy // this one is only for count, do not add any channel after this
+	APITypePassthrough // Generic HTTP passthrough — bypasses OpenAI relay framework
+	APITypeDummy       // this one is only for count, do not add any channel after this
 )
