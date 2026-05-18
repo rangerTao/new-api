@@ -12,6 +12,7 @@ import (
 	channelconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
@@ -47,7 +48,7 @@ func CustomPassthrough(c *gin.Context) {
 
 	cfg := info.ChannelOtherSettings.ResolvedPassthrough()
 	subPath := normalizePath(c.Param("path"))
-	model := c.Param("model")
+	modelName := c.Param("model")
 	method := c.Request.Method
 
 	// ----- 2. Safety: path + method allowlist -----
@@ -66,7 +67,7 @@ func CustomPassthrough(c *gin.Context) {
 	priceData, err := helper.ModelPriceHelperPerCall(c, info)
 	if err != nil {
 		respondJSONError(c, http.StatusBadRequest, types.ErrorCodeBadRequestBody,
-			fmt.Errorf("model_price lookup failed for %q: %w", model, err))
+			fmt.Errorf("model_price lookup failed for %q: %w", modelName, err))
 		return
 	}
 	info.PriceData = priceData
@@ -81,22 +82,73 @@ func CustomPassthrough(c *gin.Context) {
 
 	// "Calling = pay": settle the full pre-consumed amount on EVERY exit path,
 	// success or failure. Defer guarantees a single settlement even on panic.
+	// Settlement records both the billing change AND a consume log entry so
+	// the request shows up in the dashboard / channel / token usage views.
 	settled := false
-	settleOnce := func(actualQuota int) {
+	requestStart := time.Now()
+	settleOnce := func(actualQuota int, upstreamStatus int, upstreamLatencyMs int64) {
 		if settled {
 			return
 		}
 		settled = true
-		if priceData.FreeModel {
-			return
+
+		// 1) settle billing (skips on FreeModel)
+		if !priceData.FreeModel {
+			if err := service.SettleBilling(c, info, actualQuota); err != nil {
+				logger.LogError(c, fmt.Sprintf("passthrough billing settle failed: %v", err))
+			}
 		}
-		if err := service.SettleBilling(c, info, actualQuota); err != nil {
-			logger.LogError(c, fmt.Sprintf("passthrough billing settle failed: %v", err))
+
+		// 2) record consume log + update aggregate counters so the request
+		//    is visible on the dashboard, even for free models or upstream
+		//    errors (per "calling = pay" semantics).
+		logQuota := actualQuota
+		if priceData.FreeModel {
+			logQuota = 0
+		}
+		useTimeSeconds := int(time.Since(requestStart).Seconds())
+		other := map[string]interface{}{
+			"is_passthrough":       true,
+			"request_path":         c.Request.URL.Path,
+			"request_method":       method,
+			"upstream_sub_path":    subPath,
+			"upstream_status_code": upstreamStatus,
+			"upstream_latency_ms":  upstreamLatencyMs,
+			"model_price":          priceData.ModelPrice,
+		}
+		if priceData.GroupRatioInfo.GroupRatio > 0 {
+			other["group_ratio"] = priceData.GroupRatioInfo.GroupRatio
+		}
+		if priceData.GroupRatioInfo.HasSpecialRatio {
+			other["user_group_ratio"] = priceData.GroupRatioInfo.GroupSpecialRatio
+		}
+		logContent := fmt.Sprintf("Passthrough %s %s，按次计费", method, subPath)
+		if priceData.FreeModel {
+			logContent += "（免费模型）"
+		}
+
+		model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
+			ChannelId:      info.ChannelId,
+			ModelName:      modelName,
+			TokenName:      c.GetString("token_name"),
+			Quota:          logQuota,
+			Content:        logContent,
+			TokenId:        info.TokenId,
+			UseTimeSeconds: useTimeSeconds,
+			IsStream:       false,
+			Group:          info.UsingGroup,
+			Other:          other,
+		})
+		// UpdateUserUsedQuotaAndRequestCount also bumps request_count by 1,
+		// so free-model calls (logQuota==0) still register as a request.
+		model.UpdateUserUsedQuotaAndRequestCount(info.UserId, logQuota)
+		if logQuota > 0 {
+			model.UpdateChannelUsedQuota(info.ChannelId, logQuota)
 		}
 	}
 	defer func() {
 		// Guarantees billing on panic; normal paths call settleOnce explicitly.
-		settleOnce(priceData.Quota)
+		settleOnce(priceData.Quota, 0, 0)
 	}()
 
 	// ----- 4. Build upstream request -----
@@ -143,7 +195,7 @@ func CustomPassthrough(c *gin.Context) {
 	upstreamLatencyMs := time.Since(upstreamStart).Milliseconds()
 	c.Set("passthrough_upstream_status", resp.StatusCode)
 	c.Set("passthrough_upstream_latency_ms", upstreamLatencyMs)
-	c.Set("passthrough_route", model+":"+subPath)
+	c.Set("passthrough_route", modelName+":"+subPath)
 
 	// ----- 6. Forward response (streaming-aware) -----
 	forwardUpstreamResponse(c, resp)
@@ -151,9 +203,9 @@ func CustomPassthrough(c *gin.Context) {
 	// Log per-call billing audit (kept minimal to avoid bloating the logs).
 	logger.LogInfo(c, fmt.Sprintf(
 		"passthrough billed: model=%s channel=%d quota=%d upstream=%d latency_ms=%d path=%s",
-		model, info.ChannelId, priceData.Quota, resp.StatusCode, upstreamLatencyMs, subPath,
+		modelName, info.ChannelId, priceData.Quota, resp.StatusCode, upstreamLatencyMs, subPath,
 	))
-	settleOnce(priceData.Quota)
+	settleOnce(priceData.Quota, resp.StatusCode, upstreamLatencyMs)
 }
 
 // ---------------------------------------------------------------------------

@@ -215,6 +215,12 @@ const EditChannelModal = (props) => {
     volc_tts_resource_id: '',
     volc_tts_auth_mode: '',
     volc_tts_require_usage: true,
+    // Passthrough (type=59) overrides (persisted under settings.passthrough)
+    passthrough_allowed_path_prefixes: '',
+    passthrough_allowed_methods: '',
+    passthrough_auth_type: '',
+    passthrough_auth_header_name: '',
+    passthrough_timeout_ms: 0,
     upstream_model_update_check_enabled: false,
     upstream_model_update_auto_sync_enabled: false,
     upstream_model_update_last_check_time: 0,
@@ -929,6 +935,44 @@ const EditChannelModal = (props) => {
             data.volc_tts_resource_id = '';
             data.volc_tts_auth_mode = '';
             data.volc_tts_require_usage = true;
+          }
+          // 读取 Passthrough (type=59) 配置
+          if (
+            parsedSettings.passthrough &&
+            typeof parsedSettings.passthrough === 'object'
+          ) {
+            data.passthrough_allowed_path_prefixes = Array.isArray(
+              parsedSettings.passthrough.allowed_path_prefixes,
+            )
+              ? parsedSettings.passthrough.allowed_path_prefixes.join('\n')
+              : '';
+            data.passthrough_allowed_methods = Array.isArray(
+              parsedSettings.passthrough.allowed_methods,
+            )
+              ? parsedSettings.passthrough.allowed_methods.join(',')
+              : '';
+            if (
+              parsedSettings.passthrough.auth &&
+              typeof parsedSettings.passthrough.auth === 'object'
+            ) {
+              data.passthrough_auth_type =
+                parsedSettings.passthrough.auth.type || '';
+              data.passthrough_auth_header_name =
+                parsedSettings.passthrough.auth.header_name || '';
+            } else {
+              data.passthrough_auth_type = '';
+              data.passthrough_auth_header_name = '';
+            }
+            data.passthrough_timeout_ms =
+              typeof parsedSettings.passthrough.timeout_ms === 'number'
+                ? parsedSettings.passthrough.timeout_ms
+                : 0;
+          } else {
+            data.passthrough_allowed_path_prefixes = '';
+            data.passthrough_allowed_methods = '';
+            data.passthrough_auth_type = '';
+            data.passthrough_auth_header_name = '';
+            data.passthrough_timeout_ms = 0;
           }
           data.upstream_model_update_check_enabled =
             parsedSettings.upstream_model_update_check_enabled === true;
@@ -1860,6 +1904,54 @@ const EditChannelModal = (props) => {
       }
     } else if ('volc_tts' in settings) {
       delete settings.volc_tts;
+    }
+
+    // Passthrough (type=59): forward arbitrary HTTP requests to upstream.
+    // Empty allowed_path_prefixes is intentional (deny-all default on backend).
+    if (localInputs.type === 59) {
+      const passthrough = {};
+      const prefixes = String(
+        localInputs.passthrough_allowed_path_prefixes || '',
+      )
+        .split(/\r?\n/)
+        .map((p) => p.trim())
+        .filter(Boolean);
+      if (prefixes.length > 0) {
+        passthrough.allowed_path_prefixes = prefixes;
+      }
+      const methods = String(localInputs.passthrough_allowed_methods || '')
+        .split(',')
+        .map((m) => m.trim().toUpperCase())
+        .filter(Boolean);
+      if (methods.length > 0) {
+        passthrough.allowed_methods = methods;
+      }
+      if (
+        localInputs.passthrough_auth_type &&
+        localInputs.passthrough_auth_type !== 'none'
+      ) {
+        const auth = { type: localInputs.passthrough_auth_type };
+        if (
+          localInputs.passthrough_auth_type === 'header' &&
+          localInputs.passthrough_auth_header_name
+        ) {
+          auth.header_name = localInputs.passthrough_auth_header_name;
+        }
+        passthrough.auth = auth;
+      }
+      if (
+        typeof localInputs.passthrough_timeout_ms === 'number' &&
+        localInputs.passthrough_timeout_ms > 0
+      ) {
+        passthrough.timeout_ms = localInputs.passthrough_timeout_ms;
+      }
+      if (Object.keys(passthrough).length > 0) {
+        settings.passthrough = passthrough;
+      } else if ('passthrough' in settings) {
+        delete settings.passthrough;
+      }
+    } else if ('passthrough' in settings) {
+      delete settings.passthrough;
     }
 
     settings.upstream_model_update_check_enabled =
@@ -3565,6 +3657,104 @@ const EditChannelModal = (props) => {
                             }
                             extraText={t(
                               '开启后会发送 X-Control-Require-Usage-Tokens-Return 头部，SessionFinished 帧将携带 usage.text_words 用于计费。'
+                            )}
+                          />
+                        </div>
+                      )}
+
+                      {inputs.type === 59 && (
+                        <div className='mt-3'>
+                          <Banner
+                            type='info'
+                            description={t(
+                              'Passthrough 渠道把客户端 /v1/custom/{model}/{path} 请求原样转发到 Base URL + path。每次调用按 model_price 按次计费（无论上游成功失败）。请务必在「模型价格」中为模型配置按次价格。'
+                            )}
+                            className='!rounded-lg'
+                          />
+                          <Form.TextArea
+                            field='passthrough_allowed_path_prefixes'
+                            label={t('允许的路径前缀 *')}
+                            placeholder={'/api/layout/\n/health'}
+                            autosize={{ minRows: 3, maxRows: 8 }}
+                            onChange={(value) =>
+                              handleInputChange(
+                                'passthrough_allowed_path_prefixes',
+                                value,
+                              )
+                            }
+                            extraText={t(
+                              '每行一个前缀。请求子路径必须命中其中之一，否则上游返回 403。留空时全部拒绝（fail-safe 默认）。'
+                            )}
+                          />
+                          <Form.Input
+                            field='passthrough_allowed_methods'
+                            label={t('允许的 HTTP 方法')}
+                            placeholder='POST,GET'
+                            onChange={(value) =>
+                              handleInputChange(
+                                'passthrough_allowed_methods',
+                                value,
+                              )
+                            }
+                            extraText={t(
+                              '逗号分隔，留空表示允许所有方法。方法名大小写不敏感。'
+                            )}
+                          />
+                          <Form.Select
+                            field='passthrough_auth_type'
+                            label={t('上游鉴权方式')}
+                            placeholder={t('不注入鉴权头')}
+                            onChange={(value) =>
+                              handleInputChange('passthrough_auth_type', value)
+                            }
+                            optionList={[
+                              { value: '', label: t('不注入鉴权头') },
+                              {
+                                value: 'bearer',
+                                label: 'Bearer (Authorization: Bearer <Key>)',
+                              },
+                              {
+                                value: 'header',
+                                label: t('自定义头（使用下方字段）'),
+                              },
+                              {
+                                value: 'basic',
+                                label: 'Basic (Key 必须是 user:pass)',
+                              },
+                            ]}
+                            extraText={t(
+                              '指定渠道密钥如何注入到上游请求。「不注入鉴权头」适用于内网 / IP 白名单上游。'
+                            )}
+                          />
+                          {inputs.passthrough_auth_type === 'header' && (
+                            <Form.Input
+                              field='passthrough_auth_header_name'
+                              label={t('自定义头名')}
+                              placeholder='X-Api-Key'
+                              onChange={(value) =>
+                                handleInputChange(
+                                  'passthrough_auth_header_name',
+                                  value,
+                                )
+                              }
+                              extraText={t(
+                                '当鉴权方式为「自定义头」时必填。渠道密钥将作为该头部的值原样发送。'
+                              )}
+                            />
+                          )}
+                          <Form.InputNumber
+                            field='passthrough_timeout_ms'
+                            label={t('上游超时（毫秒）')}
+                            placeholder='0'
+                            min={0}
+                            onChange={(value) =>
+                              handleInputChange(
+                                'passthrough_timeout_ms',
+                                Number(value || 0),
+                              )
+                            }
+                            extraText={t(
+                              '请求级超时上限。0 表示不额外限制（仍受客户端断连约束）。'
                             )}
                           />
                         </div>
