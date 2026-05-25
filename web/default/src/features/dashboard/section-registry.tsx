@@ -36,6 +36,12 @@ const DASHBOARD_SECTIONS = [
     build: () => null,
   },
   {
+    id: 'token-summary',
+    titleKey: 'Model Token Usage',
+    descriptionKey: 'Aggregate input/output token usage by model',
+    build: () => null,
+  },
+  {
     id: 'users',
     titleKey: 'User Analytics',
     descriptionKey: 'View user consumption statistics and charts',

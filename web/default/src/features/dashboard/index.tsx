@@ -148,6 +148,10 @@ const SECTION_META: Record<
     titleKey: 'Model Call Analytics',
     descriptionKey: 'View model call count analytics and charts',
   },
+  'token-summary': {
+    titleKey: 'Model Token Usage',
+    descriptionKey: 'Aggregate input/output token usage by model',
+  },
   users: {
     titleKey: 'User Analytics',
     descriptionKey: 'View user consumption statistics and charts',
@@ -204,6 +208,8 @@ export function Dashboard() {
       ),
     [isAdmin]
   )
+  const sectionUsesModelData =
+    activeSection === 'models' || activeSection === 'token-summary'
   const handleSectionChange = useCallback(
     (section: string) => {
       void navigate({
@@ -215,20 +221,19 @@ export function Dashboard() {
   )
   const showSectionTabs =
     activeSection !== 'overview' && visibleSections.length > 1
-  const modelActions =
-    activeSection === 'models' ? (
-      <>
-        <ModelsChartPreferences
-          preferences={chartPreferences}
-          onPreferencesChange={handleChartPreferencesChange}
-        />
-        <ModelsFilter
-          preferences={chartPreferences}
-          onFilterChange={handleFilterChange}
-          onReset={handleResetFilters}
-        />
-      </>
-    ) : null
+  const modelActions = sectionUsesModelData ? (
+    <>
+      <ModelsChartPreferences
+        preferences={chartPreferences}
+        onPreferencesChange={handleChartPreferencesChange}
+      />
+      <ModelsFilter
+        preferences={chartPreferences}
+        onFilterChange={handleFilterChange}
+        onReset={handleResetFilters}
+      />
+    </>
+  ) : null
 
   return (
     <SectionPageLayout>
@@ -304,7 +309,19 @@ export function Dashboard() {
                   />
                 </Suspense>
               </FadeIn>
-              <FadeIn delay={0.2}>
+            </>
+          )}
+          {activeSection === 'token-summary' && (
+            <>
+              <FadeIn>
+                <Suspense fallback={<LogStatCardsFallback />}>
+                  <LazyLogStatCards
+                    filters={modelFilters}
+                    onDataUpdate={handleDataUpdate}
+                  />
+                </Suspense>
+              </FadeIn>
+              <FadeIn delay={0.1}>
                 <Suspense fallback={<ModelChartsFallback />}>
                   <LazyModelTokenSummaryChart
                     data={modelData}

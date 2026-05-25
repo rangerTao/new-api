@@ -495,6 +495,76 @@ export const useDashboardCharts = (
     color: { type: 'ordinal', range: USER_COLORS },
   });
 
+  // ========== 模型 Token 用量汇总（输入/输出 横向堆叠） ==========
+  const [spec_model_token_summary, setSpecModelTokenSummary] = useState({
+    type: 'bar',
+    data: [{ id: 'modelTokenSummaryData', values: [] }],
+    xField: 'Tokens',
+    yField: 'Model',
+    seriesField: 'Type',
+    direction: 'horizontal',
+    stack: true,
+    legends: { visible: true, position: 'start', orient: 'top' },
+    title: {
+      visible: true,
+      text: t('模型Token用量汇总'),
+      subtext: '',
+    },
+    bar: {
+      state: { hover: { stroke: '#000', lineWidth: 1 } },
+    },
+    axes: [
+      { orient: 'left', type: 'band', label: { style: { fontSize: 11 } } },
+      {
+        orient: 'bottom',
+        type: 'linear',
+        label: { formatMethod: (value) => renderNumber(value) },
+      },
+    ],
+    tooltip: {
+      mark: {
+        content: [
+          {
+            key: (datum) => datum['Type'],
+            value: (datum) => renderNumber(datum['Tokens'] || 0),
+          },
+        ],
+      },
+      dimension: {
+        title: { value: (datum) => datum['Model'] },
+        content: [
+          {
+            key: (datum) => datum['Type'],
+            value: (datum) => datum['Tokens'] || 0,
+          },
+        ],
+        updateContent: (array, datum) => {
+          const first = Array.isArray(datum) ? datum[0] : datum;
+          const total = (first && first.Total) || 0;
+          const count = (first && first.Count) || 0;
+          for (let i = 0; i < array.length; i++) {
+            const v = parseFloat(array[i].value) || 0;
+            array[i].value = renderNumber(v);
+          }
+          array.unshift({
+            key: t('总计'),
+            value: renderNumber(total),
+          });
+          array.push({
+            key: t('调用次数'),
+            value: renderNumber(count),
+          });
+          return array;
+        },
+      },
+    },
+    color: {
+      type: 'ordinal',
+      domain: [t('输入'), t('输出'), t('未分类')],
+      range: ['#3b82f6', '#10b981', '#9ca3af'],
+    },
+  });
+
   // ========== Admin: 用户Token趋势 ==========
   const [spec_user_token_trend, setSpecUserTokenTrend] = useState({
     type: 'area',
@@ -738,6 +808,135 @@ export const useDashboardCharts = (
         'rankData',
       );
 
+      // ===== 模型 Token 用量汇总（输入/输出 + 未分类 fallback）=====
+      const MAX_MODELS = 30;
+      const modelTokenMap = new Map();
+      for (const [, value] of aggregatedData) {
+        const prev = modelTokenMap.get(value.model) || {
+          prompt: 0,
+          completion: 0,
+          unknown: 0,
+          count: 0,
+        };
+        modelTokenMap.set(value.model, {
+          prompt: prev.prompt + (value.promptTokens || 0),
+          completion: prev.completion + (value.completionTokens || 0),
+          unknown: prev.unknown + (value.unknownTokens || 0),
+          count: prev.count + (value.count || 0),
+        });
+      }
+
+      const allTokenRows = Array.from(modelTokenMap.entries())
+        .map(([model, stats]) => ({
+          model,
+          promptTokens: stats.prompt,
+          completionTokens: stats.completion,
+          unknownTokens: stats.unknown,
+          totalTokens: stats.prompt + stats.completion + stats.unknown,
+          count: stats.count,
+        }))
+        .sort((a, b) => b.totalTokens - a.totalTokens);
+
+      let tokenSummaryRows = allTokenRows;
+      if (allTokenRows.length > MAX_MODELS) {
+        const top = allTokenRows.slice(0, MAX_MODELS);
+        const merged = allTokenRows.slice(MAX_MODELS).reduce(
+          (acc, row) => ({
+            promptTokens: acc.promptTokens + row.promptTokens,
+            completionTokens: acc.completionTokens + row.completionTokens,
+            unknownTokens: acc.unknownTokens + row.unknownTokens,
+            totalTokens: acc.totalTokens + row.totalTokens,
+            count: acc.count + row.count,
+          }),
+          {
+            promptTokens: 0,
+            completionTokens: 0,
+            unknownTokens: 0,
+            totalTokens: 0,
+            count: 0,
+          },
+        );
+        tokenSummaryRows = [
+          ...top,
+          { model: t('其他'), ...merged },
+        ];
+      }
+
+      const totalUnknownTokens = tokenSummaryRows.reduce(
+        (s, r) => s + r.unknownTokens,
+        0,
+      );
+      const hasUnknown = totalUnknownTokens > 0;
+      const inputLabel = t('输入');
+      const outputLabel = t('输出');
+      const unknownLabel = t('未分类');
+
+      const tokenSummaryValues = tokenSummaryRows.flatMap((r) => {
+        const items = [
+          {
+            Model: r.model,
+            Type: inputLabel,
+            Tokens: r.promptTokens,
+            Total: r.totalTokens,
+            Count: r.count,
+          },
+          {
+            Model: r.model,
+            Type: outputLabel,
+            Tokens: r.completionTokens,
+            Total: r.totalTokens,
+            Count: r.count,
+          },
+        ];
+        if (hasUnknown) {
+          items.push({
+            Model: r.model,
+            Type: unknownLabel,
+            Tokens: r.unknownTokens,
+            Total: r.totalTokens,
+            Count: r.count,
+          });
+        }
+        return items;
+      });
+
+      const totalSummaryTokens = tokenSummaryRows.reduce(
+        (s, r) => s + r.totalTokens,
+        0,
+      );
+      const modelOrder = tokenSummaryRows.map((r) => r.model);
+
+      setSpecModelTokenSummary((prev) => ({
+        ...prev,
+        data: [{ id: 'modelTokenSummaryData', values: tokenSummaryValues }],
+        title: {
+          ...prev.title,
+          subtext: `${t('总计')}：${renderNumber(totalSummaryTokens)}`,
+        },
+        axes: [
+          {
+            orient: 'left',
+            type: 'band',
+            domain: modelOrder,
+            label: { style: { fontSize: 11 } },
+          },
+          {
+            orient: 'bottom',
+            type: 'linear',
+            label: { formatMethod: (value) => renderNumber(value) },
+          },
+        ],
+        color: {
+          type: 'ordinal',
+          domain: hasUnknown
+            ? [inputLabel, outputLabel, unknownLabel]
+            : [inputLabel, outputLabel],
+          range: hasUnknown
+            ? ['#3b82f6', '#10b981', '#9ca3af']
+            : ['#3b82f6', '#10b981'],
+        },
+      }));
+
       setPieData(newPieData);
       setLineData(newLineData);
       setConsumeQuota(totalQuota);
@@ -852,6 +1051,7 @@ export const useDashboardCharts = (
     spec_model_line,
     spec_rank_bar,
     spec_token_bar,
+    spec_model_token_summary,
     spec_user_rank,
     spec_user_trend,
     spec_user_token_rank,

@@ -195,6 +195,7 @@ const Dashboard = () => {
             spec_pie={dashboardCharts.spec_pie}
             spec_rank_bar={dashboardCharts.spec_rank_bar}
             spec_token_bar={dashboardCharts.spec_token_bar}
+            spec_model_token_summary={dashboardCharts.spec_model_token_summary}
             spec_user_rank={dashboardCharts.spec_user_rank}
             spec_user_trend={dashboardCharts.spec_user_trend}
             spec_user_token_rank={dashboardCharts.spec_user_token_rank}

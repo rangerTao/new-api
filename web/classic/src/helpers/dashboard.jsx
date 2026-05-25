@@ -350,13 +350,27 @@ export const aggregateDataByTimeAndModel = (data, dataExportDefaultTime) => {
         quota: 0,
         count: 0,
         tokenUsed: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        unknownTokens: 0,
       });
     }
 
     const existing = aggregatedData.get(key);
     existing.quota += item.quota;
     existing.count += item.count;
-    existing.tokenUsed += item.token_used || 0;
+    const tokenUsed = item.token_used || 0;
+    const promptTokens = item.prompt_tokens || 0;
+    const completionTokens = item.completion_tokens || 0;
+    existing.tokenUsed += tokenUsed;
+    existing.promptTokens += promptTokens;
+    existing.completionTokens += completionTokens;
+    // Historical rows have prompt/completion = 0 but token_used > 0;
+    // surface that as Unknown so the new chart still shows a total.
+    existing.unknownTokens += Math.max(
+      0,
+      tokenUsed - promptTokens - completionTokens,
+    );
   });
 
   return aggregatedData;
