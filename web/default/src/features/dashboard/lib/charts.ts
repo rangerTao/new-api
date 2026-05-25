@@ -23,6 +23,7 @@ import { MAX_CHART_TREND_POINTS } from '@/features/dashboard/constants'
 import type {
   QuotaDataItem,
   ProcessedChartData,
+  ProcessedModelTokenSummary,
   ProcessedUserChartData,
 } from '@/features/dashboard/types'
 
@@ -990,5 +991,240 @@ export function processUserChartData(
       background: { fill: 'transparent' },
       animation: true,
     },
+  }
+}
+
+/**
+ * Process model token usage summary for the time range (no time bucketing).
+ * Aggregates prompt_tokens / completion_tokens per model and produces a
+ * horizontal stacked bar chart spec.
+ */
+export function processModelTokenSummary(
+  data: QuotaDataItem[],
+  t?: TFunction,
+  themeKey?: string
+): ProcessedModelTokenSummary {
+  const tt: TFunction = t ?? ((x) => x)
+  const inputLabel = tt('Input')
+  const outputLabel = tt('Output')
+  const unknownLabel = tt('Unknown')
+  const otherLabel = tt('Other')
+  const formatInt = (value: number) =>
+    Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value)
+
+  const modelMap = new Map<
+    string,
+    { prompt: number; completion: number; unknown: number; count: number }
+  >()
+  ;(data || []).forEach((item) => {
+    const model = item.model_name || 'Unknown'
+    const prompt = Number(item.prompt_tokens) || 0
+    const completion = Number(item.completion_tokens) || 0
+    const tokenUsed = Number(item.token_used) || 0
+    // Historical data has prompt/completion = 0 but token_used > 0;
+    // surface that as a separate "Unknown" segment so totals are still visible.
+    const unknown = Math.max(0, tokenUsed - prompt - completion)
+    const count = Number(item.count) || 0
+    const prev = modelMap.get(model) || {
+      prompt: 0,
+      completion: 0,
+      unknown: 0,
+      count: 0,
+    }
+    modelMap.set(model, {
+      prompt: prev.prompt + prompt,
+      completion: prev.completion + completion,
+      unknown: prev.unknown + unknown,
+      count: prev.count + count,
+    })
+  })
+
+  const allRows: Array<{
+    model: string
+    promptTokens: number
+    completionTokens: number
+    unknownTokens: number
+    totalTokens: number
+    count: number
+  }> = Array.from(modelMap.entries())
+    .map(([model, stats]) => ({
+      model,
+      promptTokens: stats.prompt,
+      completionTokens: stats.completion,
+      unknownTokens: stats.unknown,
+      totalTokens: stats.prompt + stats.completion + stats.unknown,
+      count: stats.count,
+    }))
+    .sort((a, b) => b.totalTokens - a.totalTokens)
+
+  const MAX_MODELS = 30
+  let rows = allRows
+  if (allRows.length > MAX_MODELS) {
+    const top = allRows.slice(0, MAX_MODELS)
+    const tail = allRows.slice(MAX_MODELS)
+    const merged = tail.reduce(
+      (acc, row) => ({
+        promptTokens: acc.promptTokens + row.promptTokens,
+        completionTokens: acc.completionTokens + row.completionTokens,
+        unknownTokens: acc.unknownTokens + row.unknownTokens,
+        totalTokens: acc.totalTokens + row.totalTokens,
+        count: acc.count + row.count,
+      }),
+      {
+        promptTokens: 0,
+        completionTokens: 0,
+        unknownTokens: 0,
+        totalTokens: 0,
+        count: 0,
+      }
+    )
+    rows = [
+      ...top,
+      {
+        model: otherLabel,
+        ...merged,
+      },
+    ]
+  }
+
+  const totalPromptTokens = rows.reduce((s, r) => s + r.promptTokens, 0)
+  const totalCompletionTokens = rows.reduce(
+    (s, r) => s + r.completionTokens,
+    0
+  )
+  const totalUnknownTokens = rows.reduce((s, r) => s + r.unknownTokens, 0)
+  const totalTokens =
+    totalPromptTokens + totalCompletionTokens + totalUnknownTokens
+  const hasUnknown = totalUnknownTokens > 0
+
+  // VChart values: two-or-three rows per model (Input + Output [+ Unknown])
+  const values = rows.flatMap((r) => {
+    const items: Array<Record<string, string | number>> = [
+      {
+        Model: r.model,
+        Type: inputLabel,
+        Tokens: r.promptTokens,
+        Total: r.totalTokens,
+        Count: r.count,
+      },
+      {
+        Model: r.model,
+        Type: outputLabel,
+        Tokens: r.completionTokens,
+        Total: r.totalTokens,
+        Count: r.count,
+      },
+    ]
+    if (hasUnknown) {
+      items.push({
+        Model: r.model,
+        Type: unknownLabel,
+        Tokens: r.unknownTokens,
+        Total: r.totalTokens,
+        Count: r.count,
+      })
+    }
+    return items
+  })
+
+  const themeColors = getThemeChartColors(themeKey)
+  const inputColor = themeColors[0] || '#5B8FF9'
+  const outputColor = themeColors[1] || '#5AD8A6'
+  const unknownColor = themeColors[2] || '#9CA3AF'
+
+  // Bigger total -> appear at top; VChart band axis reversed
+  const modelOrder = rows.map((r) => r.model)
+
+  const seriesDomain = hasUnknown
+    ? [inputLabel, outputLabel, unknownLabel]
+    : [inputLabel, outputLabel]
+  const seriesRange = hasUnknown
+    ? [inputColor, outputColor, unknownColor]
+    : [inputColor, outputColor]
+
+  const spec: Record<string, unknown> = {
+    type: 'bar',
+    data: [{ id: 'modelTokenSummary', values }],
+    xField: 'Tokens',
+    yField: 'Model',
+    seriesField: 'Type',
+    direction: 'horizontal',
+    stack: true,
+    legends: { visible: true, position: 'start', orient: 'top' },
+    color: {
+      type: 'ordinal',
+      domain: seriesDomain,
+      range: seriesRange,
+    },
+    bar: {
+      state: { hover: { stroke: '#000', lineWidth: 1 } },
+    },
+    axes: [
+      {
+        orient: 'left',
+        type: 'band',
+        domain: modelOrder,
+        label: { style: { fontSize: 11 } },
+      },
+      {
+        orient: 'bottom',
+        type: 'linear',
+        label: {
+          formatMethod: (value: number) => formatInt(value),
+        },
+      },
+    ],
+    tooltip: {
+      mark: {
+        content: [
+          {
+            key: (datum: Record<string, unknown>) => datum?.Type,
+            value: (datum: Record<string, unknown>) =>
+              formatInt(Number(datum?.Tokens) || 0),
+          },
+        ],
+      },
+      dimension: {
+        title: {
+          value: (datum: Record<string, unknown>) => datum?.Model,
+        },
+        content: [
+          {
+            key: (datum: Record<string, unknown>) => datum?.Type,
+            value: (datum: Record<string, unknown>) =>
+              formatInt(Number(datum?.Tokens) || 0),
+          },
+        ],
+        updateContent: (
+          array: Array<{ key: string; value: string | number }>,
+          datum?: Record<string, unknown> | Record<string, unknown>[]
+        ) => {
+          const first = Array.isArray(datum) ? datum[0] : datum
+          const total = Number(first?.Total) || 0
+          const count = Number(first?.Count) || 0
+          array.unshift({
+            key: tt('Total:'),
+            value: formatInt(total),
+          })
+          array.push({
+            key: tt('Count'),
+            value: formatInt(count),
+          })
+          return array
+        },
+      },
+    },
+    background: { fill: 'transparent' },
+    animation: true,
+  }
+
+  return {
+    spec,
+    rows,
+    totalPromptTokens,
+    totalCompletionTokens,
+    totalUnknownTokens,
+    totalTokens,
+    hasUnknown,
   }
 }

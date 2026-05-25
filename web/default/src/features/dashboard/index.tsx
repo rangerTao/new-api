@@ -65,6 +65,12 @@ const LazyConsumptionDistributionChart = lazy(() =>
   }))
 )
 
+const LazyModelTokenSummaryChart = lazy(() =>
+  import('./components/models/model-token-summary-chart').then((m) => ({
+    default: m.ModelTokenSummaryChart,
+  }))
+)
+
 const LazyPerformanceOverview = lazy(() =>
   import('./components/models/performance-overview').then((m) => ({
     default: m.PerformanceOverview,
@@ -295,6 +301,16 @@ export function Dashboard() {
                     timeGranularity={
                       modelFilters.time_granularity || DEFAULT_TIME_GRANULARITY
                     }
+                  />
+                </Suspense>
+              </FadeIn>
+              <FadeIn delay={0.2}>
+                <Suspense fallback={<ModelChartsFallback />}>
+                  <LazyModelTokenSummaryChart
+                    data={modelData}
+                    loading={dataLoading}
+                    startTimestamp={modelFilters.start_timestamp}
+                    endTimestamp={modelFilters.end_timestamp}
                   />
                 </Suspense>
               </FadeIn>

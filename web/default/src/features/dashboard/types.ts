@@ -29,6 +29,8 @@ export interface QuotaDataItem {
   model_name?: string
   created_at: number
   token_used?: number
+  prompt_tokens?: number
+  completion_tokens?: number
   count?: number
   quota?: number
 }
@@ -110,6 +112,25 @@ export interface ProcessedChartData {
 export interface ProcessedUserChartData {
   spec_user_rank: VChartSpec
   spec_user_trend: VChartSpec
+}
+
+export interface ModelTokenSummaryRow {
+  model: string
+  promptTokens: number
+  completionTokens: number
+  unknownTokens: number
+  totalTokens: number
+  count: number
+}
+
+export interface ProcessedModelTokenSummary {
+  spec: VChartSpec
+  rows: ModelTokenSummaryRow[]
+  totalPromptTokens: number
+  totalCompletionTokens: number
+  totalUnknownTokens: number
+  totalTokens: number
+  hasUnknown: boolean
 }
 
 // ============================================================================
