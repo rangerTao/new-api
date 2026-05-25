@@ -495,14 +495,13 @@ export const useDashboardCharts = (
     color: { type: 'ordinal', range: USER_COLORS },
   });
 
-  // ========== 模型 Token 用量汇总（输入/输出 横向堆叠） ==========
+  // ========== 模型 Token 用量汇总（输入/输出 垂直堆叠，等宽，左对齐） ==========
   const [spec_model_token_summary, setSpecModelTokenSummary] = useState({
     type: 'bar',
     data: [{ id: 'modelTokenSummaryData', values: [] }],
-    xField: 'Tokens',
-    yField: 'Model',
+    xField: 'Model',
+    yField: 'Tokens',
     seriesField: 'Type',
-    direction: 'horizontal',
     stack: true,
     legends: { visible: true, position: 'start', orient: 'top' },
     title: {
@@ -511,12 +510,26 @@ export const useDashboardCharts = (
       subtext: '',
     },
     bar: {
+      style: {
+        // 等宽柱子（封顶 32px，模型少时柱子不会撑得太宽）
+        maxWidth: 32,
+      },
       state: { hover: { stroke: '#000', lineWidth: 1 } },
     },
     axes: [
-      { orient: 'left', type: 'band', label: { style: { fontSize: 11 } } },
       {
         orient: 'bottom',
+        type: 'band',
+        bandPadding: 0.4,
+        label: {
+          style: { fontSize: 11 },
+          autoRotate: true,
+          autoRotateAngle: [-45],
+          flush: true,
+        },
+      },
+      {
+        orient: 'left',
         type: 'linear',
         label: { formatMethod: (value) => renderNumber(value) },
       },
@@ -563,6 +576,16 @@ export const useDashboardCharts = (
       domain: [t('输入'), t('输出'), t('未分类')],
       range: ['#3b82f6', '#10b981', '#9ca3af'],
     },
+  });
+
+  // ========== 模型 Token 用量汇总：原始数据 + 总计指标 ==========
+  const [modelTokenSummary, setModelTokenSummary] = useState({
+    rows: [],
+    totalPromptTokens: 0,
+    totalCompletionTokens: 0,
+    totalUnknownTokens: 0,
+    totalTokens: 0,
+    hasUnknown: false,
   });
 
   // ========== Admin: 用户Token趋势 ==========
@@ -866,6 +889,14 @@ export const useDashboardCharts = (
         (s, r) => s + r.unknownTokens,
         0,
       );
+      const totalPromptTokens = tokenSummaryRows.reduce(
+        (s, r) => s + r.promptTokens,
+        0,
+      );
+      const totalCompletionTokens = tokenSummaryRows.reduce(
+        (s, r) => s + r.completionTokens,
+        0,
+      );
       const hasUnknown = totalUnknownTokens > 0;
       const inputLabel = t('输入');
       const outputLabel = t('输出');
@@ -915,13 +946,19 @@ export const useDashboardCharts = (
         },
         axes: [
           {
-            orient: 'left',
+            orient: 'bottom',
             type: 'band',
             domain: modelOrder,
-            label: { style: { fontSize: 11 } },
+            bandPadding: 0.4,
+            label: {
+              style: { fontSize: 11 },
+              autoRotate: true,
+              autoRotateAngle: [-45],
+              flush: true,
+            },
           },
           {
-            orient: 'bottom',
+            orient: 'left',
             type: 'linear',
             label: { formatMethod: (value) => renderNumber(value) },
           },
@@ -936,6 +973,15 @@ export const useDashboardCharts = (
             : ['#3b82f6', '#10b981'],
         },
       }));
+
+      setModelTokenSummary({
+        rows: tokenSummaryRows,
+        totalPromptTokens,
+        totalCompletionTokens,
+        totalUnknownTokens,
+        totalTokens: totalSummaryTokens,
+        hasUnknown,
+      });
 
       setPieData(newPieData);
       setLineData(newLineData);
@@ -1052,6 +1098,7 @@ export const useDashboardCharts = (
     spec_rank_bar,
     spec_token_bar,
     spec_model_token_summary,
+    modelTokenSummary,
     spec_user_rank,
     spec_user_trend,
     spec_user_token_rank,

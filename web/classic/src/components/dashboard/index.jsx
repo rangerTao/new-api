@@ -25,6 +25,7 @@ import { StatusContext } from '../../context/Status';
 import DashboardHeader from './DashboardHeader';
 import StatsCards from './StatsCards';
 import ChartsPanel from './ChartsPanel';
+import ModelTokenSummaryPanel from './ModelTokenSummaryPanel';
 import ApiInfoPanel from './ApiInfoPanel';
 import AnnouncementsPanel from './AnnouncementsPanel';
 import FaqPanel from './FaqPanel';
@@ -195,7 +196,6 @@ const Dashboard = () => {
             spec_pie={dashboardCharts.spec_pie}
             spec_rank_bar={dashboardCharts.spec_rank_bar}
             spec_token_bar={dashboardCharts.spec_token_bar}
-            spec_model_token_summary={dashboardCharts.spec_model_token_summary}
             spec_user_rank={dashboardCharts.spec_user_rank}
             spec_user_trend={dashboardCharts.spec_user_trend}
             spec_user_token_rank={dashboardCharts.spec_user_token_rank}
@@ -220,6 +220,18 @@ const Dashboard = () => {
             />
           )}
         </div>
+      </div>
+
+      {/* 模型 Token 用量汇总（独立面板，输入/输出/未分类 横向堆叠 + 导出 CSV） */}
+      <div className='mb-4'>
+        <ModelTokenSummaryPanel
+          spec={dashboardCharts.spec_model_token_summary}
+          summary={dashboardCharts.modelTokenSummary}
+          CARD_PROPS={CARD_PROPS}
+          CHART_CONFIG={CHART_CONFIG}
+          FLEX_CENTER_GAP2={FLEX_CENTER_GAP2}
+          t={dashboardData.t}
+        />
       </div>
 
       {/* 系统公告和常见问答卡片 */}

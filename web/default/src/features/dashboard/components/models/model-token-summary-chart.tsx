@@ -159,7 +159,6 @@ export function ModelTokenSummaryChart(props: ModelTokenSummaryChartProps) {
   }
 
   const hasData = summary.rows.length > 0
-  const dynamicHeight = Math.max(320, summary.rows.length * 28 + 80)
 
   const chartKey = [
     props.loading ? 'loading' : 'ready',
@@ -190,10 +189,7 @@ export function ModelTokenSummaryChart(props: ModelTokenSummaryChartProps) {
         </Button>
       </div>
 
-      <div
-        className='p-1.5 sm:p-2'
-        style={{ height: `${dynamicHeight}px`, maxHeight: '720px' }}
-      >
+      <div className='h-[300px] p-1.5 sm:h-96 sm:p-2'>
         {themeReady && hasData && (
           <VChart
             key={chartKey}

@@ -156,7 +156,6 @@ export const ALL_CHART_TABS = [
   { key: '3', label: '调用次数分布', adminOnly: false },
   { key: '4', label: '调用次数排行', adminOnly: false },
   { key: '7', label: 'Token消耗分布', adminOnly: false },
-  { key: '10', label: '模型Token用量汇总', adminOnly: false },
   { key: '5', label: '用户消耗排行', adminOnly: true },
   { key: '6', label: '用户消耗趋势', adminOnly: true },
   { key: '8', label: '用户Token排行', adminOnly: true },

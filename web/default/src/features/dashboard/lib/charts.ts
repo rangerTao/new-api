@@ -1145,29 +1145,40 @@ export function processModelTokenSummary(
   const spec: Record<string, unknown> = {
     type: 'bar',
     data: [{ id: 'modelTokenSummary', values }],
-    xField: 'Tokens',
-    yField: 'Model',
+    xField: 'Model',
+    yField: 'Tokens',
     seriesField: 'Type',
-    direction: 'horizontal',
     stack: true,
     legends: { visible: true, position: 'start', orient: 'top' },
+    bar: {
+      style: {
+        // Equal-width bars, capped to keep readable when model count is small
+        maxWidth: 32,
+      },
+      state: { hover: { stroke: '#000', lineWidth: 1 } },
+    },
     color: {
       type: 'ordinal',
       domain: seriesDomain,
       range: seriesRange,
     },
-    bar: {
-      state: { hover: { stroke: '#000', lineWidth: 1 } },
-    },
     axes: [
       {
-        orient: 'left',
+        orient: 'bottom',
         type: 'band',
         domain: modelOrder,
-        label: { style: { fontSize: 11 } },
+        // Left-align: band axis lays out categories left-to-right by default;
+        // also disable centering so the first bar hugs the y-axis.
+        bandPadding: 0.4,
+        label: {
+          style: { fontSize: 11 },
+          autoRotate: true,
+          autoRotateAngle: [-45],
+          flush: true,
+        },
       },
       {
-        orient: 'bottom',
+        orient: 'left',
         type: 'linear',
         label: {
           formatMethod: (value: number) => formatInt(value),
