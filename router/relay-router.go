@@ -78,6 +78,8 @@ func SetRelayRouter(router *gin.Engine) {
 		wsRouter.GET("/realtime", func(c *gin.Context) {
 			controller.Relay(c, types.RelayFormatOpenAIRealtime)
 		})
+		// 火山 v3 双向流式 TTS 透传（model 通过 query param 传递）
+		wsRouter.GET("/audio/realtime", controller.RelayVolcRealtimeTTS)
 	}
 	{
 		//http router

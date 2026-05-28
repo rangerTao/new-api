@@ -287,6 +287,11 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		//wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01
 		modelRequest.Model = c.Query("model")
 	}
+	if strings.HasPrefix(c.Request.URL.Path, "/v1/audio/realtime") {
+		// wss://your-host/v1/audio/realtime?model=doubao-tts-realtime
+		// 火山 v3 双向流式 TTS 透传：model 通过 query 传入，body 为空
+		modelRequest.Model = c.Query("model")
+	}
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/moderations") {
 		if modelRequest.Model == "" {
 			modelRequest.Model = "text-moderation-stable"

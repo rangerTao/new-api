@@ -52,6 +52,11 @@ const (
 	RelayModeGemini
 
 	RelayModeResponsesCompact
+
+	// RelayModeVolcRealtimeTTS — Volcengine v3 双向流式 TTS 透传
+	// 客户端通过 WebSocket 直接连接 /v1/audio/realtime，使用火山原生协议帧
+	// 与上游 wss://.../api/v3/tts/bidirection 通信，项目仅做鉴权 + 计费 + 透传
+	RelayModeVolcRealtimeTTS
 )
 
 func Path2RelayMode(path string) int {
@@ -84,6 +89,8 @@ func Path2RelayMode(path string) int {
 		relayMode = RelayModeAudioTranslation
 	} else if strings.HasPrefix(path, "/v1/rerank") {
 		relayMode = RelayModeRerank
+	} else if strings.HasPrefix(path, "/v1/audio/realtime") {
+		relayMode = RelayModeVolcRealtimeTTS
 	} else if strings.HasPrefix(path, "/v1/realtime") {
 		relayMode = RelayModeRealtime
 	} else if strings.HasPrefix(path, "/v1beta/models") || strings.HasPrefix(path, "/v1/models") {
