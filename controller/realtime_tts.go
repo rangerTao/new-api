@@ -4,15 +4,19 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel/volcengine"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 )
 
 // RelayVolcRealtimeTTS 处理客户端通过 WebSocket 双向流式调用火山 TTS v3 的请求。
@@ -23,10 +27,10 @@ import (
 //  2. 校验渠道类型是否为火山引擎；非火山直接拒绝（避免协议不匹配）
 //  3. 升级 HTTP 连接为 WebSocket
 //  4. 拉起 volcengine.HandleRealtimeTTSPassthrough 完成上游拨号 + 双向帧泵
-//
-// 阶段一：透传链路 + 鉴权 + 错误处理；不含计费（计费在阶段二补充）。
+//  5. 连接结束时，根据累计的 text_words 写消费日志并扣减用户/渠道额度
 func RelayVolcRealtimeTTS(c *gin.Context) {
 	requestId := c.GetString(common.RequestIdKey)
+	startTime := time.Now()
 
 	channelType := c.GetInt("channel_type")
 	if channelType != constant.ChannelTypeVolcEngine {
@@ -58,10 +62,76 @@ func RelayVolcRealtimeTTS(c *gin.Context) {
 	}
 	defer ws.Close()
 
-	// 双向透传到火山 v3 双向流式 TTS（阶段一：不计费）。
-	if relayErr := volcengine.HandleRealtimeTTSPassthrough(c, ws, channel); relayErr != nil {
+	// 双向透传到火山 v3 双向流式 TTS。
+	// 即使 relayErr != nil 也尽力计费已完成的部分（usage 是按 SessionFinished 帧累加的）。
+	usage, relayErr := volcengine.HandleRealtimeTTSPassthrough(c, ws, channel)
+	if relayErr != nil {
 		logger.LogError(c, fmt.Sprintf("realtime tts passthrough error: %s [reqId=%s]", relayErr.Error(), requestId))
 	}
+	settleVolcRealtimeBilling(c, usage, channel, startTime)
+}
+
+// settleVolcRealtimeBilling 按累计 text_words 计算 quota、写消费日志、扣减用户/渠道额度。
+//
+// 计费公式：quota = text_words × audioRatio × groupRatio
+// 火山官方文档明确按"text_words 计费字符数"结算，所以把它视作输入文本 token，
+// 直接乘以模型的 audioRatio 与分组倍率。
+//
+// 即使 text_words==0（连接异常断开/没收到 SessionFinished/usage 没启用）也写一条
+// quota=0 的日志：让看板上能看到这次实时语音调用，便于审计。
+func settleVolcRealtimeBilling(c *gin.Context, usage *dto.Usage, channel *model.Channel, startTime time.Time) {
+	textWords := 0
+	if usage != nil {
+		textWords = usage.PromptTokensDetails.TextTokens
+	}
+
+	userID := c.GetInt("id")
+	tokenID := c.GetInt("token_id")
+	tokenName := c.GetString("token_name")
+	usingGroup := c.GetString("group")
+	modelName := common.GetContextKeyString(c, constant.ContextKeyOriginalModel)
+
+	audioRatio := ratio_setting.GetAudioRatio(modelName)
+	groupRatio := ratio_setting.GetGroupRatio(usingGroup)
+
+	// 用 decimal 避免浮点漂移，再四舍五入到整数 quota
+	q := decimal.NewFromInt(int64(textWords)).
+		Mul(decimal.NewFromFloat(audioRatio)).
+		Mul(decimal.NewFromFloat(groupRatio))
+	quota := int(q.Round(0).IntPart())
+	if textWords > 0 && audioRatio > 0 && groupRatio > 0 && quota <= 0 {
+		// 与 calculateAudioQuota 一致的下限：避免极小倍率四舍五入到 0 而不计费
+		quota = 1
+	}
+
+	useTimeSeconds := int(time.Since(startTime).Seconds())
+	logContent := fmt.Sprintf("音频倍率 %.2f，分组倍率 %.2f", audioRatio, groupRatio)
+
+	if quota > 0 {
+		model.UpdateUserUsedQuotaAndRequestCount(userID, quota)
+		model.UpdateChannelUsedQuota(channel.Id, quota)
+	} else {
+		// 没产生 quota 也至少 +1 调用次数（quota=0 模式）
+		model.UpdateUserUsedQuotaAndRequestCount(userID, 0)
+	}
+
+	model.RecordConsumeLog(c, userID, model.RecordConsumeLogParams{
+		ChannelId:        channel.Id,
+		PromptTokens:     textWords,
+		CompletionTokens: 0,
+		ModelName:        modelName,
+		TokenName:        tokenName,
+		Quota:            quota,
+		Content:          logContent,
+		TokenId:          tokenID,
+		UseTimeSeconds:   useTimeSeconds,
+		IsStream:         true,
+		Group:            usingGroup,
+		Other: map[string]interface{}{
+			"realtime_tts": true,
+			"text_words":   textWords,
+		},
+	})
 }
 
 // writeRealtimeBadRequest 在 WebSocket upgrade 之前以 JSON 返回错误。

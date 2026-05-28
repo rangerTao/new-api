@@ -2,17 +2,32 @@ package volcengine
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+)
+
+// Volcengine v3 协议事件码（与 tts_v3_ws.go 共用，但这里只用 SessionFinished 做计费）。
+const (
+	v3EventSessionFinished int32 = 152
+)
+
+// v3 frame header bits — 仅解析 SessionFinished 用，不做完整协议解码。
+const (
+	v3MsgTypeFullServer = 0b1001 // Full-server response
+	v3FlagWithEvent     = 0b0100
 )
 
 // realtimeTTSUpstreamURL 是火山 v3 双向流式 TTS 端点。
@@ -37,18 +52,24 @@ const realtimeWriteTimeout = 10 * time.Second
 // HandleRealtimeTTSPassthrough 把客户端 WebSocket（已 upgrade）与火山 v3 双向
 // 流式 TTS 之间做纯字节透传。
 //
-// 阶段一职责：
+// 职责：
 //   - 加载渠道的 VolcTTSConfig（resource_id / auth_mode / require_usage）
 //   - 用 buildV3Headers 注入 X-Api-Key / X-Api-Resource-Id / X-Api-Connect-Id /
 //     X-Control-Require-Usage-Tokens-Return（与现有 tts_v3_ws.go 路径同款逻辑）
 //   - 与上游建立 WS 连接
 //   - 启两个 goroutine 双向泵帧；任一方向出错或客户端断开都会拉倒另一边
+//   - 在上游→客户端方向上识别 Event_SessionFinished (152) 帧，抠出
+//     usage.text_words 累加；同一个 WS 连接可能跑多个 session，需累计
 //
-// 阶段二将在这里增加：解析下行 Event_SessionFinished (152) 帧抠 usage.text_words
-// 累加做计费 + 写 RecordConsumeLog。
-func HandleRealtimeTTSPassthrough(c *gin.Context, clientWS *websocket.Conn, channel *model.Channel) error {
+// 返回的 *dto.Usage 仅 PromptTokens / TotalTokens / PromptTokensDetails.TextTokens
+// 三处赋值（=累计 text_words）。火山以"输入字符数"计费，所以把它视作输入文本 token；
+// 由调用方决定按哪个倍率结算。
+//
+// 注意：返回 (*dto.Usage, error) — 即使 error != nil 也可能有部分 usage 累计
+// （比如完成了几轮 session 后客户端异常断开），调用方仍应基于 usage 写消费日志。
+func HandleRealtimeTTSPassthrough(c *gin.Context, clientWS *websocket.Conn, channel *model.Channel) (*dto.Usage, error) {
 	if channel == nil {
-		return errors.New("channel is nil")
+		return nil, errors.New("channel is nil")
 	}
 
 	otherSettings := channel.GetOtherSettings()
@@ -56,13 +77,13 @@ func HandleRealtimeTTSPassthrough(c *gin.Context, clientWS *websocket.Conn, chan
 
 	apiKey := strings.TrimSpace(channel.Key)
 	if apiKey == "" {
-		return errors.New("channel api key is empty")
+		return nil, errors.New("channel api key is empty")
 	}
 
 	connectID := uuid.NewString()
 	upstreamHeader, err := buildV3Headers(volcCfg, apiKey, connectID)
 	if err != nil {
-		return fmt.Errorf("build volcengine v3 headers: %w", err)
+		return nil, fmt.Errorf("build volcengine v3 headers: %w", err)
 	}
 
 	dialCtx, cancelDial := context.WithTimeout(context.Background(), realtimeDialTimeout)
@@ -81,7 +102,7 @@ func HandleRealtimeTTSPassthrough(c *gin.Context, clientWS *websocket.Conn, chan
 		// 通过 close frame 把建连失败的原因传给客户端，方便排错
 		writeCloseWithReason(clientWS, websocket.CloseInternalServerErr,
 			fmt.Sprintf("upstream dial failed (status=%d): %v%s", statusCode, dialErr, hint))
-		return fmt.Errorf("dial volcengine v3: %w%s", dialErr, hint)
+		return nil, fmt.Errorf("dial volcengine v3: %w%s", dialErr, hint)
 	}
 	defer upstreamWS.Close()
 
@@ -108,12 +129,18 @@ func HandleRealtimeTTSPassthrough(c *gin.Context, clientWS *websocket.Conn, chan
 
 	errCh := make(chan error, 2)
 
-	// 上游 → 客户端：对 src 加 idle deadline，超时即视为上游卡住。
+	// totalTextWords 在两个 goroutine 中只由 upstream→client pump 写入，
+	// 但用 atomic 保证读侧的可见性（连接结束时由调用方读）。
+	var totalTextWords int64
+
+	// 上游 → 客户端：对 src 加 idle deadline，超时即视为上游卡住；
+	// 同时识别 SessionFinished 帧抠 text_words 累加做计费。
 	go func() {
-		errCh <- pumpRealtimeFrames(upstreamWS, clientWS, "upstream→client", realtimeUpstreamIdleTimeout)
+		errCh <- pumpRealtimeFramesWithUsage(upstreamWS, clientWS,
+			"upstream→client", realtimeUpstreamIdleTimeout, &totalTextWords)
 	}()
 
-	// 客户端 → 上游：不加 idle 限制（用户可能正在思考或停顿）。
+	// 客户端 → 上游：不加 idle 限制（用户可能正在思考或停顿），不计费。
 	go func() {
 		errCh <- pumpRealtimeFrames(clientWS, upstreamWS, "client→upstream", 0)
 	}()
@@ -123,10 +150,12 @@ func HandleRealtimeTTSPassthrough(c *gin.Context, clientWS *websocket.Conn, chan
 	cancel()
 	// 等第二个 goroutine 退出，避免泄露
 	<-errCh
-	return firstErr
+
+	usage := buildRealtimeTTSUsage(int(atomic.LoadInt64(&totalTextWords)))
+	return usage, firstErr
 }
 
-// pumpRealtimeFrames 把 src 收到的每条 WS 消息原样转发到 dst。
+// pumpRealtimeFrames 把 src 收到的每条 WS 消息原样转发到 dst（无计费旁路）。
 // idleTimeout==0 表示不限制 src 的读超时；客户端侧适用此值。
 //
 // 返回 nil 表示正常关闭（CloseNormalClosure / CloseGoingAway），其他错误代表异常。
@@ -152,6 +181,116 @@ func pumpRealtimeFrames(src, dst *websocket.Conn, label string, idleTimeout time
 		if err := dst.WriteMessage(msgType, payload); err != nil {
 			return fmt.Errorf("%s write: %w", label, err)
 		}
+	}
+}
+
+// pumpRealtimeFramesWithUsage 与 pumpRealtimeFrames 行为相同，但额外把每帧的
+// 字节按 SessionFinished (152) 检查并把 usage.text_words 累加到 totalTextWords。
+//
+// 透传不破坏：先写到 dst 再做计费解析（解析失败也不影响转发），保证客户端永远
+// 收到完整的、原样的火山下行帧。
+func pumpRealtimeFramesWithUsage(src, dst *websocket.Conn, label string,
+	idleTimeout time.Duration, totalTextWords *int64) error {
+	for {
+		if idleTimeout > 0 {
+			_ = src.SetReadDeadline(time.Now().Add(idleTimeout))
+		}
+		msgType, payload, err := src.ReadMessage()
+		if err != nil {
+			if websocket.IsCloseError(err,
+				websocket.CloseNormalClosure,
+				websocket.CloseGoingAway,
+				websocket.CloseNoStatusReceived) {
+				return nil
+			}
+			return fmt.Errorf("%s read: %w", label, err)
+		}
+
+		if err := dst.SetWriteDeadline(time.Now().Add(realtimeWriteTimeout)); err != nil {
+			return fmt.Errorf("%s set write deadline: %w", label, err)
+		}
+		if err := dst.WriteMessage(msgType, payload); err != nil {
+			return fmt.Errorf("%s write: %w", label, err)
+		}
+
+		// 透传完成后做"非破坏式"计费解析：只对二进制帧 + 长度合法的帧解析，
+		// 解析失败/不是 SessionFinished 都安静跳过，绝不影响透传链路。
+		if msgType == websocket.BinaryMessage {
+			if textWords, ok := tryParseSessionFinishedTextWords(payload); ok {
+				atomic.AddInt64(totalTextWords, int64(textWords))
+			}
+		}
+	}
+}
+
+// tryParseSessionFinishedTextWords 在火山 v3 二进制帧里识别 SessionFinished (152)
+// 并解析 payload JSON 里的 usage.text_words。其他帧返回 0, false。
+//
+// 协议帧格式（仅本函数关心的字段）：
+//
+//	[0]: header bits（version + size）
+//	[1]: msg_type(4) | flags(4)  — 期望 0b1001 (Full-server) | 0b0100 (with event)
+//	[2]: serialization | compression  — 不解析
+//	[3]: reserved
+//	[4-7]: int32 BE event code  — 期望 152
+//	[8-11]: uint32 BE session_id length
+//	[12 ..]: session_id bytes
+//	[..]: uint32 BE payload length + payload JSON
+//
+// 解析失败一律返回 0, false — 调用方据此安静跳过，不影响透传。
+func tryParseSessionFinishedTextWords(data []byte) (int, bool) {
+	if len(data) < 12 {
+		return 0, false
+	}
+	msgType := (data[1] >> 4) & 0x0F
+	flags := data[1] & 0x0F
+	if msgType != v3MsgTypeFullServer || flags&v3FlagWithEvent == 0 {
+		return 0, false
+	}
+	event := int32(binary.BigEndian.Uint32(data[4:8]))
+	if event != v3EventSessionFinished {
+		return 0, false
+	}
+	pos := 8
+	if pos+4 > len(data) {
+		return 0, false
+	}
+	sidLen := int(binary.BigEndian.Uint32(data[pos : pos+4]))
+	pos += 4
+	if pos+sidLen+4 > len(data) {
+		return 0, false
+	}
+	pos += sidLen
+	plen := int(binary.BigEndian.Uint32(data[pos : pos+4]))
+	pos += 4
+	if pos+plen > len(data) {
+		return 0, false
+	}
+	var env v3SessionResultEnvelope
+	if err := common.Unmarshal(data[pos:pos+plen], &env); err != nil {
+		return 0, false
+	}
+	if env.Usage == nil {
+		// SessionFinished 但没 usage 字段（X-Control-Require-Usage-Tokens-Return
+		// 没启用时会发生）。识别成功，但贡献 0 字符。
+		return 0, true
+	}
+	return env.Usage.TextWords, true
+}
+
+// buildRealtimeTTSUsage 把累计 text_words 包装成 *dto.Usage，供调用方计费。
+// 火山 TTS 按"输入字符数"计费，所以把 text_words 当作 PromptTokens / TextTokens。
+func buildRealtimeTTSUsage(totalTextWords int) *dto.Usage {
+	if totalTextWords < 0 {
+		totalTextWords = 0
+	}
+	return &dto.Usage{
+		PromptTokens:     totalTextWords,
+		CompletionTokens: 0,
+		TotalTokens:      totalTextWords,
+		PromptTokensDetails: dto.InputTokenDetails{
+			TextTokens: totalTextWords,
+		},
 	}
 }
 
