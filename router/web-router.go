@@ -32,6 +32,38 @@ func NormalizeWebBasePath(value string) string {
 	return strings.TrimRight(value, "/")
 }
 
+func StripWebBasePath(basePath string) gin.HandlerFunc {
+	basePath = NormalizeWebBasePath(basePath)
+	return func(c *gin.Context) {
+		if basePath == "" || !strings.HasPrefix(c.Request.URL.Path, basePath) {
+			c.Next()
+			return
+		}
+
+		originalPath := c.Request.URL.Path
+		originalRawPath := c.Request.URL.RawPath
+		originalRequestURI := c.Request.RequestURI
+
+		c.Request.URL.Path = strings.TrimPrefix(c.Request.URL.Path, basePath)
+		if c.Request.URL.Path == "" {
+			c.Request.URL.Path = "/"
+		}
+		if c.Request.URL.RawPath != "" && strings.HasPrefix(c.Request.URL.RawPath, basePath) {
+			c.Request.URL.RawPath = strings.TrimPrefix(c.Request.URL.RawPath, basePath)
+			if c.Request.URL.RawPath == "" {
+				c.Request.URL.RawPath = "/"
+			}
+		}
+		c.Request.RequestURI = c.Request.URL.RequestURI()
+
+		c.Next()
+
+		c.Request.URL.Path = originalPath
+		c.Request.URL.RawPath = originalRawPath
+		c.Request.RequestURI = originalRequestURI
+	}
+}
+
 func SetWebRouter(router *gin.Engine, assets ThemeAssets, basePath string) {
 	defaultFS := common.EmbedFolder(assets.DefaultBuildFS, "web/default/dist")
 	classicFS := common.EmbedFolder(assets.ClassicBuildFS, "web/classic/dist")

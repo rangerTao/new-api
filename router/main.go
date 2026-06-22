@@ -17,6 +17,7 @@ func SetRouter(router *gin.Engine, assets ThemeAssets) {
 	var webRouter *gin.RouterGroup
 	if webBasePath != "" {
 		webRouter = router.Group(webBasePath)
+		webRouter.Use(StripWebBasePath(webBasePath))
 	}
 	SetApiRouter(router)
 	SetDashboardRouter(router)
