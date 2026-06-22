@@ -33,6 +33,7 @@ import { Modal, Toast } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
+import { getAppUrl } from '../../helpers/basePath';
 
 import RechargeCard from './RechargeCard';
 import InvitationCard from './InvitationCard';
@@ -708,7 +709,7 @@ const TopUp = () => {
     const res = await API.get('/api/user/aff');
     const { success, message, data } = res.data;
     if (success) {
-      let link = `${window.location.origin}/register?aff=${data}`;
+      let link = getAppUrl(`/register?aff=${data}`);
       setAffLink(link);
     } else {
       showError(message);

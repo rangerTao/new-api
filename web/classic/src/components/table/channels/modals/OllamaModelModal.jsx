@@ -50,6 +50,7 @@ import {
   showError,
   showSuccess,
 } from '../../../../helpers';
+import { withAppBasePath } from '../../../../helpers/basePath';
 
 const { Text, Title } = Typography;
 
@@ -339,15 +340,18 @@ const OllamaModelModal = ({
         ...authHeaders,
       };
 
-      const response = await fetch('/api/channel/ollama/pull/stream', {
-        method: 'POST',
-        headers: fetchHeaders,
-        body: JSON.stringify({
-          channel_id: channelId,
-          model_name: pullModelName.trim(),
-        }),
-        signal: controller.signal,
-      });
+      const response = await fetch(
+        withAppBasePath('/api/channel/ollama/pull/stream'),
+        {
+          method: 'POST',
+          headers: fetchHeaders,
+          body: JSON.stringify({
+            channel_id: channelId,
+            model_name: pullModelName.trim(),
+          }),
+          signal: controller.signal,
+        },
+      );
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);

@@ -24,8 +24,16 @@ import path from 'path';
 import { codeInspectorPlugin } from 'code-inspector-plugin';
 const { vitePluginSemi } = pkg;
 
+function normalizeBasePath(value) {
+  const trimmed = value?.trim();
+  if (!trimmed || trimmed === '/') return '/';
+  const withLeadingSlash = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+  return `${withLeadingSlash.replace(/\/+$/, '')}/`;
+}
+
 // https://vitejs.dev/config/
 export default defineConfig({
+  base: normalizeBasePath(process.env.VITE_REACT_APP_BASE_PATH),
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

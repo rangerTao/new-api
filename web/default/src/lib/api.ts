@@ -20,13 +20,14 @@ import axios from 'axios'
 import i18next from 'i18next'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
+import { appBasePath } from '@/lib/base-path'
 
 // ============================================================================
 // Axios Instance Configuration
 // ============================================================================
 
-// Base URL: empty string for same-origin API requests
-const baseURL = ''
+// Base URL: same-origin API requests, optionally mounted under a sub-path.
+const baseURL = import.meta.env.VITE_REACT_APP_SERVER_URL || appBasePath
 
 // Create axios instance with default config
 export const api = axios.create({

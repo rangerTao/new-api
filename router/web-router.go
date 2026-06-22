@@ -21,7 +21,40 @@ type ThemeAssets struct {
 	ClassicIndexPage []byte
 }
 
-func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
+func NormalizeWebBasePath(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "/" {
+		return ""
+	}
+	if !strings.HasPrefix(value, "/") {
+		value = "/" + value
+	}
+	return strings.TrimRight(value, "/")
+}
+
+func SetWebBasePathRouter(router *gin.Engine, assets ThemeAssets, basePath string) {
+	basePath = NormalizeWebBasePath(basePath)
+	if basePath == "" {
+		return
+	}
+
+	router.GET(basePath, func(c *gin.Context) {
+		serveIndexPage(c, assets)
+	})
+	router.HEAD(basePath, func(c *gin.Context) {
+		serveIndexPage(c, assets)
+	})
+	router.Any(basePath+"/*path", func(c *gin.Context) {
+		c.Request.URL.Path = strings.TrimPrefix(c.Request.URL.Path, basePath)
+		if c.Request.URL.Path == "" {
+			c.Request.URL.Path = "/"
+		}
+		c.Request.RequestURI = c.Request.URL.RequestURI()
+		router.HandleContext(c)
+	})
+}
+
+func SetWebRouter(router *gin.Engine, assets ThemeAssets, basePath string) {
 	defaultFS := common.EmbedFolder(assets.DefaultBuildFS, "web/default/dist")
 	classicFS := common.EmbedFolder(assets.ClassicBuildFS, "web/classic/dist")
 	themeFS := common.NewThemeAwareFS(defaultFS, classicFS)
@@ -32,15 +65,29 @@ func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
 	router.Use(static.Serve("/", themeFS))
 	router.NoRoute(func(c *gin.Context) {
 		c.Set(middleware.RouteTagKey, "web")
-		if strings.HasPrefix(c.Request.RequestURI, "/v1") || strings.HasPrefix(c.Request.RequestURI, "/api") || strings.HasPrefix(c.Request.RequestURI, "/assets") {
+		if isAPILikePath(c.Request.URL.Path, basePath) {
 			controller.RelayNotFound(c)
 			return
 		}
-		c.Header("Cache-Control", "no-cache")
-		if common.GetTheme() == "classic" {
-			c.Data(http.StatusOK, "text/html; charset=utf-8", assets.ClassicIndexPage)
-		} else {
-			c.Data(http.StatusOK, "text/html; charset=utf-8", assets.DefaultIndexPage)
-		}
+		serveIndexPage(c, assets)
 	})
+}
+
+func isAPILikePath(path string, basePath string) bool {
+	basePath = NormalizeWebBasePath(basePath)
+	if basePath != "" && strings.HasPrefix(path, basePath+"/") {
+		path = strings.TrimPrefix(path, basePath)
+	}
+	return strings.HasPrefix(path, "/v1") ||
+		strings.HasPrefix(path, "/api") ||
+		strings.HasPrefix(path, "/assets")
+}
+
+func serveIndexPage(c *gin.Context, assets ThemeAssets) {
+	c.Header("Cache-Control", "no-cache")
+	if common.GetTheme() == "classic" {
+		c.Data(http.StatusOK, "text/html; charset=utf-8", assets.ClassicIndexPage)
+		return
+	}
+	c.Data(http.StatusOK, "text/html; charset=utf-8", assets.DefaultIndexPage)
 }
