@@ -14,13 +14,22 @@ import (
 
 func SetRouter(router *gin.Engine, assets ThemeAssets) {
 	webBasePath := NormalizeWebBasePath(os.Getenv("WEB_BASE_PATH"))
+	var webRouter *gin.RouterGroup
 	if webBasePath != "" {
-		SetWebBasePathRouter(router, assets, webBasePath)
+		webRouter = router.Group(webBasePath)
 	}
 	SetApiRouter(router)
 	SetDashboardRouter(router)
+	if webRouter != nil {
+		SetApiRouter(webRouter)
+		SetDashboardRouter(webRouter)
+	}
 	SetRelayRouter(router)
 	SetVideoRouter(router)
+	if webRouter != nil {
+		SetRelayRouter(webRouter)
+		SetVideoRouter(webRouter)
+	}
 	frontendBaseUrl := os.Getenv("FRONTEND_BASE_URL")
 	if common.IsMasterNode && frontendBaseUrl != "" {
 		frontendBaseUrl = ""

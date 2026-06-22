@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/gin-contrib/static"
 )
@@ -16,6 +17,12 @@ type embedFileSystem struct {
 }
 
 func (e *embedFileSystem) Exists(prefix string, path string) bool {
+	if prefix != "" && prefix != "/" && strings.HasPrefix(path, prefix) {
+		path = strings.TrimPrefix(path, prefix)
+		if path == "" {
+			path = "/"
+		}
+	}
 	_, err := e.Open(path)
 	if err != nil {
 		return false

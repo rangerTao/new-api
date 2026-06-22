@@ -32,28 +32,6 @@ func NormalizeWebBasePath(value string) string {
 	return strings.TrimRight(value, "/")
 }
 
-func SetWebBasePathRouter(router *gin.Engine, assets ThemeAssets, basePath string) {
-	basePath = NormalizeWebBasePath(basePath)
-	if basePath == "" {
-		return
-	}
-
-	router.GET(basePath, func(c *gin.Context) {
-		serveIndexPage(c, assets)
-	})
-	router.HEAD(basePath, func(c *gin.Context) {
-		serveIndexPage(c, assets)
-	})
-	router.Any(basePath+"/*path", func(c *gin.Context) {
-		c.Request.URL.Path = strings.TrimPrefix(c.Request.URL.Path, basePath)
-		if c.Request.URL.Path == "" {
-			c.Request.URL.Path = "/"
-		}
-		c.Request.RequestURI = c.Request.URL.RequestURI()
-		router.HandleContext(c)
-	})
-}
-
 func SetWebRouter(router *gin.Engine, assets ThemeAssets, basePath string) {
 	defaultFS := common.EmbedFolder(assets.DefaultBuildFS, "web/default/dist")
 	classicFS := common.EmbedFolder(assets.ClassicBuildFS, "web/classic/dist")
@@ -63,6 +41,10 @@ func SetWebRouter(router *gin.Engine, assets ThemeAssets, basePath string) {
 	router.Use(middleware.GlobalWebRateLimit())
 	router.Use(middleware.Cache())
 	router.Use(static.Serve("/", themeFS))
+	basePath = NormalizeWebBasePath(basePath)
+	if basePath != "" {
+		router.Use(static.Serve(basePath, themeFS))
+	}
 	router.NoRoute(func(c *gin.Context) {
 		c.Set(middleware.RouteTagKey, "web")
 		if isAPILikePath(c.Request.URL.Path, basePath) {

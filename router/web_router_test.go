@@ -9,16 +9,16 @@ import (
 func TestWebBasePathRouterCanRegisterBeforeRelayRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
-	assets := ThemeAssets{
-		DefaultIndexPage: []byte("<!doctype html><div id=\"root\"></div>"),
-		ClassicIndexPage: []byte("<!doctype html><div id=\"root\"></div>"),
-	}
+	webRouter := engine.Group("/web")
 
-	SetWebBasePathRouter(engine, assets, "/web")
 	SetApiRouter(engine)
 	SetDashboardRouter(engine)
+	SetApiRouter(webRouter)
+	SetDashboardRouter(webRouter)
 	SetRelayRouter(engine)
 	SetVideoRouter(engine)
+	SetRelayRouter(webRouter)
+	SetVideoRouter(webRouter)
 }
 
 func TestNormalizeWebBasePath(t *testing.T) {
