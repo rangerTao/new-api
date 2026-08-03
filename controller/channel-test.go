@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,6 +44,17 @@ type testResult struct {
 	newAPIError *types.NewAPIError
 }
 
+func attachChannelTestRequestID(c *gin.Context, requestID string) {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		requestID = common.GetTimeString() + common.GetRandomString(8)
+	}
+	c.Set(common.RequestIdKey, requestID)
+	if c.Request != nil {
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), common.RequestIdKey, requestID))
+	}
+}
+
 func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointType string) string {
 	normalized := strings.TrimSpace(endpointType)
 	if normalized != "" {
@@ -57,7 +69,7 @@ func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointTyp
 	return normalized
 }
 
-func testChannel(channel *model.Channel, testModel string, endpointType string, isStream bool) testResult {
+func testChannel(channel *model.Channel, testModel string, endpointType string, isStream bool, requestID string) testResult {
 	tik := time.Now()
 	var unsupportedTestChannelTypes = []int{
 		constant.ChannelTypeMidjourney,
@@ -142,6 +154,7 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 		Body:   nil,
 		Header: make(http.Header),
 	}
+	attachChannelTestRequestID(c, requestID)
 
 	cache, err := model.GetUserCache(1)
 	if err != nil {
@@ -853,7 +866,7 @@ func TestChannel(c *gin.Context) {
 	endpointType := c.Query("endpoint_type")
 	isStream, _ := strconv.ParseBool(c.Query("stream"))
 	tik := time.Now()
-	result := testChannel(channel, testModel, endpointType, isStream)
+	result := testChannel(channel, testModel, endpointType, isStream, c.GetString(common.RequestIdKey))
 	if result.localErr != nil {
 		resp := gin.H{
 			"success": false,
@@ -920,7 +933,7 @@ func testAllChannels(notify bool) error {
 			}
 			isChannelEnabled := channel.Status == common.ChannelStatusEnabled
 			tik := time.Now()
-			result := testChannel(channel, "", "", shouldUseStreamForAutomaticChannelTest(channel))
+			result := testChannel(channel, "", "", shouldUseStreamForAutomaticChannelTest(channel), "")
 			tok := time.Now()
 			milliseconds := tok.Sub(tik).Milliseconds()
 
