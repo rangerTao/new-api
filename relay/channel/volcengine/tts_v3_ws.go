@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 
@@ -220,6 +221,9 @@ func handleTTSV3WSResponse(c *gin.Context, requestURL string, vReq VolcengineTTS
 		hint := ""
 		if resp != nil {
 			statusCode = resp.StatusCode
+			if upID := channel.ExtractUpstreamRequestIDFromHeader(resp.Header); upID != "" {
+				c.Set(common.UpstreamRequestIdKey, upID)
+			}
 			if logID := resp.Header.Get("X-Tt-Logid"); logID != "" {
 				hint = fmt.Sprintf(" logid=%s", logID)
 			}
@@ -249,6 +253,9 @@ func handleTTSV3WSResponse(c *gin.Context, requestURL string, vReq VolcengineTTS
 
 	// Capture upstream logid (best-effort; ignore if absent).
 	if resp != nil {
+		if upID := channel.ExtractUpstreamRequestIDFromHeader(resp.Header); upID != "" {
+			c.Set(common.UpstreamRequestIdKey, upID)
+		}
 		if logID := resp.Header.Get("X-Tt-Logid"); logID != "" {
 			c.Header("X-Volc-Logid", logID)
 		}

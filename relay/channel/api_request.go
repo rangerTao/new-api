@@ -78,6 +78,25 @@ var passthroughSkipHeaderNamesLower = map[string]struct{}{
 
 var headerPassthroughRegexCache sync.Map // map[string]*regexp.Regexp
 
+var upstreamRequestIDHeaderNames = []string{
+	common2.RequestIdKey,
+	"X-Request-Id",
+	"X-Tt-Logid",
+	"X-Volc-Request-Id",
+	"X-Amzn-Requestid",
+	"Request-Id",
+}
+
+// ExtractUpstreamRequestIDFromHeader returns the first known provider request identifier.
+func ExtractUpstreamRequestIDFromHeader(header http.Header) string {
+	for _, name := range upstreamRequestIDHeaderNames {
+		if id := strings.TrimSpace(header.Get(name)); id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
 func getHeaderPassthroughRegex(pattern string) (*regexp.Regexp, error) {
 	pattern = strings.TrimSpace(pattern)
 	if pattern == "" {
@@ -524,7 +543,7 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		return nil, errors.New("resp is nil")
 	}
 
-	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {
+	if upID := ExtractUpstreamRequestIDFromHeader(resp.Header); upID != "" {
 		c.Set(common2.UpstreamRequestIdKey, upID)
 	}
 

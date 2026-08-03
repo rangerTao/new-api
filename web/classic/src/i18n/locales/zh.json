@@ -136,6 +136,8 @@
     "Ping间隔（秒）": "Ping间隔（秒）",
     "price_xxx 的商品价格 ID，新建产品后可获得": "price_xxx 的商品价格 ID，新建产品后可获得",
     "Reasoning Effort": "Reasoning Effort",
+    "Request ID": "请求 ID",
+    "Upstream Request ID": "上游请求 ID",
     "safety_identifier 字段用于帮助 OpenAI 识别可能违反使用政策的应用程序用户。默认关闭以保护用户隐私": "safety_identifier 字段用于帮助 OpenAI 识别可能违反使用政策的应用程序用户。默认关闭以保护用户隐私",
     "service_tier 字段用于指定服务层级，允许透传可能导致实际计费高于预期。默认关闭以避免额外费用": "service_tier 字段用于指定服务层级，允许透传可能导致实际计费高于预期。默认关闭以避免额外费用",
     "sk_xxx 或 rk_xxx 的 Stripe 密钥，敏感信息不显示": "sk_xxx 或 rk_xxx 的 Stripe 密钥，敏感信息不显示",

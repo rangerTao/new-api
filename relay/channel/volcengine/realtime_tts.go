@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -95,6 +96,9 @@ func HandleRealtimeTTSPassthrough(c *gin.Context, clientWS *websocket.Conn, chan
 		statusCode := http.StatusBadGateway
 		if dialResp != nil {
 			statusCode = dialResp.StatusCode
+			if upID := relaychannel.ExtractUpstreamRequestIDFromHeader(dialResp.Header); upID != "" {
+				c.Set(common.UpstreamRequestIdKey, upID)
+			}
 			if logID := dialResp.Header.Get("X-Tt-Logid"); logID != "" {
 				hint = fmt.Sprintf(" logid=%s", logID)
 			}
@@ -109,6 +113,9 @@ func HandleRealtimeTTSPassthrough(c *gin.Context, clientWS *websocket.Conn, chan
 	// 把上游的 X-Tt-Logid 通过文本帧告知客户端便于排查（火山的 logid 是定位
 	// 服务端问题的关键）。客户端可忽略此帧（不是火山协议帧，type=1 文本帧）。
 	if dialResp != nil {
+		if upID := relaychannel.ExtractUpstreamRequestIDFromHeader(dialResp.Header); upID != "" {
+			c.Set(common.UpstreamRequestIdKey, upID)
+		}
 		if logID := dialResp.Header.Get("X-Tt-Logid"); logID != "" {
 			_ = clientWS.WriteMessage(websocket.TextMessage,
 				[]byte(`{"_proxy_meta":{"upstream_logid":"`+logID+`"}}`))

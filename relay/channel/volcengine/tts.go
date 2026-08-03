@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -161,6 +163,9 @@ func handleTTSResponse(c *gin.Context, resp *http.Response, info *relaycommon.Re
 			http.StatusInternalServerError,
 		)
 	}
+	if volcResp.ReqID != "" {
+		c.Set(common.UpstreamRequestIdKey, volcResp.ReqID)
+	}
 
 	if volcResp.Code != 3000 {
 		return nil, types.NewErrorWithStatusCode(
@@ -197,6 +202,9 @@ func generateRequestID() string {
 }
 
 func handleTTSWebSocketResponse(c *gin.Context, requestURL string, volcRequest VolcengineTTSRequest, info *relaycommon.RelayInfo, encoding string) (usage any, err *types.NewAPIError) {
+	if volcRequest.Request.ReqID != "" {
+		c.Set(common.UpstreamRequestIdKey, volcRequest.Request.ReqID)
+	}
 	_, token, parseErr := parseVolcengineAuth(info.ApiKey)
 	if parseErr != nil {
 		return nil, types.NewErrorWithStatusCode(
@@ -212,6 +220,9 @@ func handleTTSWebSocketResponse(c *gin.Context, requestURL string, volcRequest V
 	conn, resp, dialErr := websocket.DefaultDialer.DialContext(context.Background(), requestURL, header)
 	if dialErr != nil {
 		if resp != nil {
+			if upID := channel.ExtractUpstreamRequestIDFromHeader(resp.Header); upID != "" {
+				c.Set(common.UpstreamRequestIdKey, upID)
+			}
 			return nil, types.NewErrorWithStatusCode(
 				fmt.Errorf("failed to connect to websocket: %w, status: %d", dialErr, resp.StatusCode),
 				types.ErrorCodeBadResponseStatusCode,

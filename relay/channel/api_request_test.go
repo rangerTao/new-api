@@ -5,10 +5,30 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	common2 "github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestExtractUpstreamRequestIDFromHeader(t *testing.T) {
+	t.Parallel()
+
+	headers := http.Header{}
+	headers.Set("x-request-id", "  volc-request-id  ")
+
+	require.Equal(t, "volc-request-id", ExtractUpstreamRequestIDFromHeader(headers))
+}
+
+func TestExtractUpstreamRequestIDFromHeaderKeepsExistingOneAPIHeaderPriority(t *testing.T) {
+	t.Parallel()
+
+	headers := http.Header{}
+	headers.Set("X-Request-Id", "volc-request-id")
+	headers.Set(common2.RequestIdKey, "oneapi-request-id")
+
+	require.Equal(t, "oneapi-request-id", ExtractUpstreamRequestIDFromHeader(headers))
+}
 
 func TestProcessHeaderOverride_ChannelTestSkipsPassthroughRules(t *testing.T) {
 	t.Parallel()
