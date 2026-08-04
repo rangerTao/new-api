@@ -13,17 +13,31 @@ import (
 )
 
 func SetRouter(router *gin.Engine, assets ThemeAssets) {
+	webBasePath := NormalizeWebBasePath(os.Getenv("WEB_BASE_PATH"))
+	var webRouter *gin.RouterGroup
+	if webBasePath != "" {
+		webRouter = router.Group(webBasePath)
+		webRouter.Use(StripWebBasePath(webBasePath))
+	}
 	SetApiRouter(router)
 	SetDashboardRouter(router)
+	if webRouter != nil {
+		SetApiRouter(webRouter)
+		SetDashboardRouter(webRouter)
+	}
 	SetRelayRouter(router)
 	SetVideoRouter(router)
+	if webRouter != nil {
+		SetRelayRouter(webRouter)
+		SetVideoRouter(webRouter)
+	}
 	frontendBaseUrl := os.Getenv("FRONTEND_BASE_URL")
 	if common.IsMasterNode && frontendBaseUrl != "" {
 		frontendBaseUrl = ""
 		common.SysLog("FRONTEND_BASE_URL is ignored on master node")
 	}
 	if frontendBaseUrl == "" {
-		SetWebRouter(router, assets)
+		SetWebRouter(router, assets, webBasePath)
 	} else {
 		frontendBaseUrl = strings.TrimSuffix(frontendBaseUrl, "/")
 		router.NoRoute(func(c *gin.Context) {

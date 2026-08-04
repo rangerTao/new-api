@@ -21,7 +21,50 @@ type ThemeAssets struct {
 	ClassicIndexPage []byte
 }
 
-func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
+func NormalizeWebBasePath(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "/" {
+		return ""
+	}
+	if !strings.HasPrefix(value, "/") {
+		value = "/" + value
+	}
+	return strings.TrimRight(value, "/")
+}
+
+func StripWebBasePath(basePath string) gin.HandlerFunc {
+	basePath = NormalizeWebBasePath(basePath)
+	return func(c *gin.Context) {
+		if basePath == "" || !strings.HasPrefix(c.Request.URL.Path, basePath) {
+			c.Next()
+			return
+		}
+
+		originalPath := c.Request.URL.Path
+		originalRawPath := c.Request.URL.RawPath
+		originalRequestURI := c.Request.RequestURI
+
+		c.Request.URL.Path = strings.TrimPrefix(c.Request.URL.Path, basePath)
+		if c.Request.URL.Path == "" {
+			c.Request.URL.Path = "/"
+		}
+		if c.Request.URL.RawPath != "" && strings.HasPrefix(c.Request.URL.RawPath, basePath) {
+			c.Request.URL.RawPath = strings.TrimPrefix(c.Request.URL.RawPath, basePath)
+			if c.Request.URL.RawPath == "" {
+				c.Request.URL.RawPath = "/"
+			}
+		}
+		c.Request.RequestURI = c.Request.URL.RequestURI()
+
+		c.Next()
+
+		c.Request.URL.Path = originalPath
+		c.Request.URL.RawPath = originalRawPath
+		c.Request.RequestURI = originalRequestURI
+	}
+}
+
+func SetWebRouter(router *gin.Engine, assets ThemeAssets, basePath string) {
 	defaultFS := common.EmbedFolder(assets.DefaultBuildFS, "web/default/dist")
 	classicFS := common.EmbedFolder(assets.ClassicBuildFS, "web/classic/dist")
 	themeFS := common.NewThemeAwareFS(defaultFS, classicFS)
@@ -30,17 +73,35 @@ func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
 	router.Use(middleware.GlobalWebRateLimit())
 	router.Use(middleware.Cache())
 	router.Use(static.Serve("/", themeFS))
+	basePath = NormalizeWebBasePath(basePath)
+	if basePath != "" {
+		router.Use(static.Serve(basePath, themeFS))
+	}
 	router.NoRoute(func(c *gin.Context) {
 		c.Set(middleware.RouteTagKey, "web")
-		if strings.HasPrefix(c.Request.RequestURI, "/v1") || strings.HasPrefix(c.Request.RequestURI, "/api") || strings.HasPrefix(c.Request.RequestURI, "/assets") {
+		if isAPILikePath(c.Request.URL.Path, basePath) {
 			controller.RelayNotFound(c)
 			return
 		}
-		c.Header("Cache-Control", "no-cache")
-		if common.GetTheme() == "classic" {
-			c.Data(http.StatusOK, "text/html; charset=utf-8", assets.ClassicIndexPage)
-		} else {
-			c.Data(http.StatusOK, "text/html; charset=utf-8", assets.DefaultIndexPage)
-		}
+		serveIndexPage(c, assets)
 	})
+}
+
+func isAPILikePath(path string, basePath string) bool {
+	basePath = NormalizeWebBasePath(basePath)
+	if basePath != "" && strings.HasPrefix(path, basePath+"/") {
+		path = strings.TrimPrefix(path, basePath)
+	}
+	return strings.HasPrefix(path, "/v1") ||
+		strings.HasPrefix(path, "/api") ||
+		strings.HasPrefix(path, "/assets")
+}
+
+func serveIndexPage(c *gin.Context, assets ThemeAssets) {
+	c.Header("Cache-Control", "no-cache")
+	if common.GetTheme() == "classic" {
+		c.Data(http.StatusOK, "text/html; charset=utf-8", assets.ClassicIndexPage)
+		return
+	}
+	c.Data(http.StatusOK, "text/html; charset=utf-8", assets.DefaultIndexPage)
 }

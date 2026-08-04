@@ -35,6 +35,7 @@ import { Separator } from '@/components/ui/separator'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { StatusBadge } from '@/components/status-badge'
 import { OAUTH_BIND_STORAGE_KEY } from '@/features/auth/constants'
+import { getAppUrl, withAppBasePath } from '@/lib/base-path'
 import {
   getSelfOAuthBindings,
   unbindCustomOAuth,
@@ -114,8 +115,10 @@ export function AccountBindingsTab({
   }
 
   const handleBindCustomOAuth = (provider: { id: string; name: string }) => {
-    const redirectUrl = `${window.location.origin}/oauth/${provider.id}?bind=true`
-    window.location.href = `/api/oauth/${provider.id}?redirect=${encodeURIComponent(redirectUrl)}`
+    const redirectUrl = getAppUrl(`/oauth/${provider.id}?bind=true`)
+    window.location.href = withAppBasePath(
+      `/api/oauth/${provider.id}?redirect=${encodeURIComponent(redirectUrl)}`
+    )
   }
 
   useEffect(() => {

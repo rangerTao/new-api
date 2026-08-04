@@ -6,12 +6,24 @@ import { tanstackRouter } from '@tanstack/router-plugin/rspack'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
+function normalizeBasePath(value: string | undefined): string {
+  const trimmed = value?.trim()
+  if (!trimmed || trimmed === '/') return ''
+  const withLeadingSlash = trimmed.startsWith('/') ? trimmed : `/${trimmed}`
+  return withLeadingSlash.replace(/\/+$/, '')
+}
+
 export default defineConfig(({ envMode }) => {
   const env = loadEnv({ mode: envMode, prefixes: ['VITE_'] })
   const serverUrl =
     process.env.VITE_REACT_APP_SERVER_URL ||
     env.rawPublicVars.VITE_REACT_APP_SERVER_URL ||
     'http://localhost:3000'
+  const appBasePath = normalizeBasePath(
+    process.env.VITE_REACT_APP_BASE_PATH ||
+      env.rawPublicVars.VITE_REACT_APP_BASE_PATH
+  )
+  const publicBasePath = appBasePath ? `${appBasePath}/` : '/'
 
   const isProd = envMode === 'production'
   const devProxy = Object.fromEntries(
@@ -65,11 +77,13 @@ export default defineConfig(({ envMode }) => {
     },
     server: {
       host: '0.0.0.0',
+      base: publicBasePath,
       proxy: devProxy,
     },
     output: {
       // Production optimizations
       minify: isProd,
+      assetPrefix: publicBasePath,
       target: 'web',
       distPath: {
         root: 'dist',
